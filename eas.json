@@ -7,21 +7,40 @@
     "preview": {
       "channel": "preview",
       "developmentClient": true,
+      "distribution": "internal",
       "android": {
         "buildType": "apk"
       },
-      "distribution": "internal"
+      "ios": {
+        "simulator": true
+      }
     },
     "production": {
       "channel": "production",
       "autoIncrement": true,
+      "distribution": "store",
       "android": {
-        "buildType": "apk"
+        "buildType": "app-bundle"
       },
-      "distribution": "store"
+      "ios": {
+        "buildType": "archive"
+      }
+    }
+  },
+  "update": {
+    "preview": {
+      "channel": "preview"
+    },
+    "production": {
+      "channel": "production"
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "android": {
+        "serviceAccountKeyPath": "./credentials/android-service-account.json"
+      },
+      "ios": {}
+    }
   }
 }
