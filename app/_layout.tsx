@@ -5,6 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { AlertProvider } from '@/contexts/AlertContext';
+import { EnvironmentGate } from '@/components/EnvironmentGate';
 
 import * as SystemUI from 'expo-system-ui';
 import * as NavigationBar from 'expo-navigation-bar';
@@ -37,9 +38,10 @@ export default function RootLayout() {
   }, []);
 
   return (
-    <AuthProvider>
-      <AlertProvider>
-        <Stack screenOptions={{ headerShown: false }}>
+    <EnvironmentGate>
+      <AuthProvider>
+        <AlertProvider>
+          <Stack screenOptions={{ headerShown: false }}>
           {/* Écrans racine */}
           <Stack.Screen name="index" />          {/* ← Réservations (onglet index) */}
           <Stack.Screen name="(tabs)" />
@@ -56,9 +58,10 @@ export default function RootLayout() {
           {/* Divers (si présents) */}
           <Stack.Screen name="choose-profession" />
           <Stack.Screen name="debug-env" />
-        </Stack>
-        <StatusBar style="light" />
-      </AlertProvider>
-    </AuthProvider>
+          </Stack>
+          <StatusBar style="light" />
+        </AlertProvider>
+      </AuthProvider>
+    </EnvironmentGate>
   );
 }
