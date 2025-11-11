@@ -130,37 +130,63 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signIn = async (email: string, password: string) => {
     email = email.trim();
+    setLoading(true);
 
-    // 1) Authentification
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
+    try {
+      // 1) Authentification
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw error;
 
-    // 2) Préférence
-    try { await AsyncStorage.setItem(REMEMBER_KEY, rememberMe ? '1' : '0'); } catch {}
+      // 2) Préférence
+      try { await AsyncStorage.setItem(REMEMBER_KEY, rememberMe ? '1' : '0'); } catch {}
 
-    // 3) Attendre la session (jusqu’à 3s)
-    let s: Session | null = null;
-    for (let i = 0; i < 6; i++) {
-      const { data } = await supabase.auth.getSession();
-      s = data.session ?? null;
-      if (s) break;
-      await delay(500);
-    }
-    if (!s) {
-      const e: any = new Error('SESSION_NOT_READY');
-      e.code = 'SESSION_NOT_READY';
-      throw e;
-    }
+      // 3) Session (utilise la session retournée ou retente jusqu'à 3s)
+      let s: Session | null = data.session ?? null;
+      if (!s) {
+        for (let i = 0; i < 6; i++) {
+          const { data: sessionData } = await supabase.auth.getSession();
+          s = sessionData.session ?? null;
+          if (s) break;
+          await delay(500);
+        }
+      }
+      if (!s) {
+        const e: any = new Error('SESSION_NOT_READY');
+        e.code = 'SESSION_NOT_READY';
+        throw e;
+      }
+      setSession(s);
 
-    // 4) Vérif email confirmé
-    const { data: userData, error: userErr } = await supabase.auth.getUser();
-    if (userErr) throw userErr;
+      // 4) Vérif email confirmé
+      let authUser: AuthUser | null = data.user ?? null;
+      if (!authUser) {
+        const { data: userData, error: userErr } = await supabase.auth.getUser();
+        if (userErr) throw userErr;
+        authUser = userData.user ?? null;
+      }
 
-    if (!checkEmailConfirmed(userData.user ?? null)) {
-      await supabase.auth.signOut();
-      const e: any = new Error('EMAIL_NOT_CONFIRMED');
-      e.code = 'EMAIL_NOT_CONFIRMED';
-      throw e;
+      if (!checkEmailConfirmed(authUser)) {
+        await supabase.auth.signOut();
+        setSession(null);
+        setUser(null);
+        const e: any = new Error('EMAIL_NOT_CONFIRMED');
+        e.code = 'EMAIL_NOT_CONFIRMED';
+        throw e;
+      }
+
+      if (authUser?.id) {
+        try {
+          const profile = await loadUserProfileWithRetry(authUser.id);
+          setUser(profile);
+        } catch (profileErr) {
+          console.warn('[auth] loadUserProfile failed during signIn:', profileErr);
+          setUser(null);
+        }
+      } else {
+        setUser(null);
+      }
+    } finally {
+      setLoading(false);
     }
   };
 
