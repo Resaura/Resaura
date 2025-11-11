@@ -1,0 +1,27 @@
+{
+  "cli": {
+    "requireCommit": false,
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "preview": {
+      "channel": "preview",
+      "developmentClient": true,
+      "android": {
+        "buildType": "apk"
+      },
+      "distribution": "internal"
+    },
+    "production": {
+      "channel": "production",
+      "autoIncrement": true,
+      "android": {
+        "buildType": "apk"
+      },
+      "distribution": "store"
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}
