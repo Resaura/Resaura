@@ -1,46 +1,30 @@
 {
-  "cli": {
-    "requireCommit": false,
-    "appVersionSource": "remote"
-  },
+  "cli": { "appVersionSource": "remote" },
   "build": {
-    "preview": {
+    "preview-android": {
       "channel": "preview",
-      "developmentClient": true,
       "distribution": "internal",
-      "android": {
-        "buildType": "apk"
-      },
-      "ios": {
-        "simulator": true
-      }
+      "android": { "buildType": "apk" }
     },
-    "production": {
+    "production-android": {
       "channel": "production",
-      "autoIncrement": true,
       "distribution": "store",
-      "android": {
-        "buildType": "app-bundle"
-      },
-      "ios": {
-        "buildType": "archive"
-      }
-    }
-  },
-  "update": {
-    "preview": {
-      "channel": "preview"
+      "android": { "buildType": "apk" },
+      "autoIncrement": true
     },
-    "production": {
-      "channel": "production"
+    "preview-ios": {
+      "channel": "preview",
+      "distribution": "internal"
+    },
+    "production-ios": {
+      "channel": "production",
+      "distribution": "store",
+      "autoIncrement": true
     }
   },
   "submit": {
-    "production": {
-      "android": {
-        "serviceAccountKeyPath": "./credentials/android-service-account.json"
-      },
-      "ios": {}
-    }
+    "production-android": { "android": { "track": "production" } },
+    "production-ios": {}
   }
 }
+
