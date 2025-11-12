@@ -1,9 +1,9 @@
+// app.config.ts
 import type { ExpoConfig } from 'expo/config';
 
-const APP_NAME = 'resaura';
+const APP_NAME = 'Resaura';
 const SLUG = 'resaura';
 const PROJECT_ID = '9003c22f-1146-4180-bea6-fa64c470d5d6';
-const RUNTIME_VERSION_POLICY = 'sdkVersion';
 
 const config: ExpoConfig = {
   name: APP_NAME,
@@ -14,32 +14,23 @@ const config: ExpoConfig = {
   userInterfaceStyle: 'dark',
   newArchEnabled: true,
   scheme: 'resaura',
+
   splash: {
     image: './assets/splash-icon.png',
     resizeMode: 'contain',
-    backgroundColor: '#ffffff',
+    backgroundColor: '#001f3b',
   },
-  ios: {
-    supportsTablet: true,
-    bundleIdentifier: 'com.resaura.app',
-    buildNumber: '1.0.0',
-  },
+
   android: {
-    versionCode: 7,
+    package: 'com.resaura.app',
+    versionCode: 8, // ⚠️ incrémente avant chaque build store Android
     adaptiveIcon: {
       foregroundImage: './assets/adaptive-icon.png',
-      backgroundColor: '#ffffff',
+      backgroundColor: '#001f3b',
     },
     edgeToEdge: true,
-    package: 'com.resaura.app',
-    statusBar: {
-      backgroundColor: '#001f3b',
-      barStyle: 'light-content',
-    },
-    navigationBar: {
-      backgroundColor: '#001f3b',
-      barStyle: 'light-content',
-    },
+    statusBar: { backgroundColor: '#001f3b', barStyle: 'light' },
+    navigationBar: { backgroundColor: '#001f3b', barStyle: 'light' },
     softwareKeyboardLayoutMode: 'pan',
     intentFilters: [
       {
@@ -47,35 +38,41 @@ const config: ExpoConfig = {
         data: [{ scheme: 'resaura', host: 'auth', pathPrefix: '/callback' }],
         category: ['BROWSABLE', 'DEFAULT'],
       },
-      {
-        action: 'VIEW',
-        data: [{ scheme: 'resaura' }],
-        category: ['BROWSABLE', 'DEFAULT'],
-      },
+      { action: 'VIEW', data: [{ scheme: 'resaura' }], category: ['BROWSABLE', 'DEFAULT'] },
     ],
   },
-  web: {
-    favicon: './assets/favicon.png',
+
+  ios: {
+    bundleIdentifier: 'com.resaura.app', // ⚠️ respecte ton bundle ID Apple
+    buildNumber: '1.0.0',
+    supportsTablet: true,
+    infoPlist: {
+      // Deep link iOS (associe aussi les Associated Domains si besoin web)
+      CFBundleURLTypes: [
+        {
+          CFBundleURLName: 'resaura',
+          CFBundleURLSchemes: ['resaura'],
+        },
+      ],
+    },
   },
-  platforms: ['ios', 'android', 'web'],
-  plugins: ['expo-router'],
-  experiments: {
-    typedRoutes: true,
-  },
+
   updates: {
     enabled: true,
     checkAutomatically: 'ON_LOAD',
     fallbackToCacheTimeout: 0,
     url: `https://u.expo.dev/${PROJECT_ID}`,
   },
-  runtimeVersion: {
-    policy: RUNTIME_VERSION_POLICY,
-  },
-  extra: {
-    eas: {
-      projectId: PROJECT_ID,
-    },
-  },
+
+  runtimeVersion: { policy: 'sdkVersion' },
+
+  extra: { eas: { projectId: PROJECT_ID } },
+
+  plugins: ['expo-router'],
+  experiments: { typedRoutes: true },
+
+  // Les deux plateformes sont supportées
+  platforms: ['android', 'ios'],
 };
 
 export default config;
