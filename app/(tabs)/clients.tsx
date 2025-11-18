@@ -63,17 +63,17 @@ import { ClientFormModal } from '@/components/clients/ClientFormModal';
 import { SmsPickerModal } from '@/components/clients/SmsPickerModal';
 
 const FILTERS_CONFIG: Array<{ key: keyof ClientListFilters; label: string }> = [
-  { key: 'recents', label: 'RÃ©cents' },
-  { key: 'frequent', label: 'FrÃ©quents' },
+  { key: 'recents', label: 'Récents' },
+  { key: 'frequent', label: 'Fréquents' },
   { key: 'notes', label: 'Avec notes' },
   { key: 'vip', label: 'VIP' },
   { key: 'blacklist', label: 'Blacklist' },
 ];
 
 const SORT_OPTIONS: Array<{ key: ClientSortOption; label: string }> = [
-  { key: 'lastRide', label: 'DerniÃ¨re course' },
+  { key: 'lastRide', label: 'Dernière course' },
   { key: 'totalCourses', label: 'Total courses' },
-  { key: 'alpha', label: 'Nom Aâ†’Z' },
+  { key: 'alpha', label: 'Nom A→Z' },
 ];
 
 const FRENCH_MOBILE_REGEX = /^\+33(6|7)\d{8}$/;
@@ -607,7 +607,7 @@ function ClientCard({
           </Text>
           <View style={styles.clientMetaRow}>
             <Text style={styles.clientMetaText}>
-              {client.total_courses} courses Â· {formatCurrency(client.lifetime_value)}
+              {client.total_courses} courses · {formatCurrency(client.lifetime_value)}
             </Text>
             {client.loyalty_status && (
               <View style={styles.loyaltyPill}>
