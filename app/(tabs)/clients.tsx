@@ -267,7 +267,7 @@ export default function ClientsScreen() {
       const existing = await lookupClientByPhone(normalizedPhone);
       if (existing && existing.id !== formValues.id) {
         setDuplicate(existing);
-        setFormError('Ce numéro est déjà  associé à  un autre client.');
+        setFormError('Ce numéro est déjà associé à un autre client.');
         return;
       }
       const saved = await upsertClient({ ...formValues, phone: normalizedPhone });
