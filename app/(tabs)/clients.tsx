@@ -1,4 +1,4 @@
-// app/(tabs)/clients.tsx
+﻿// app/(tabs)/clients.tsx
 import React, {
   useCallback,
   useEffect,
@@ -52,6 +52,7 @@ import {
   fetchClients,
   lookupClientByPhone,
   maskPhone,
+  normalizePhone,
   sortClientItems,
   upsertClient,
 } from '@/lib/clients.service';
@@ -62,18 +63,20 @@ import { ClientFormModal } from '@/components/clients/ClientFormModal';
 import { SmsPickerModal } from '@/components/clients/SmsPickerModal';
 
 const FILTERS_CONFIG: Array<{ key: keyof ClientListFilters; label: string }> = [
-  { key: 'recents', label: 'Récents' },
-  { key: 'frequent', label: 'Fréquents' },
+  { key: 'recents', label: 'RÃ©cents' },
+  { key: 'frequent', label: 'FrÃ©quents' },
   { key: 'notes', label: 'Avec notes' },
   { key: 'vip', label: 'VIP' },
   { key: 'blacklist', label: 'Blacklist' },
 ];
 
 const SORT_OPTIONS: Array<{ key: ClientSortOption; label: string }> = [
-  { key: 'lastRide', label: 'Dernière course' },
+  { key: 'lastRide', label: 'DerniÃ¨re course' },
   { key: 'totalCourses', label: 'Total courses' },
-  { key: 'alpha', label: 'Nom A→Z' },
+  { key: 'alpha', label: 'Nom Aâ†’Z' },
 ];
+
+const FRENCH_MOBILE_REGEX = /^\+33(6|7)\d{8}$/;
 
 const EMPTY_FORM: ClientFormValues = {
   first_name: '',
@@ -249,18 +252,33 @@ export default function ClientsScreen() {
       setFormError('Nom et prénom requis.');
       return;
     }
-    if (!PHONE_E164_REGEX.test(formValues.phone.trim())) {
-      setFormError('Le numéro doit être au format international (+336...).');
+    const normalizedPhone = normalizePhone(formValues.phone.trim());
+    if (!normalizedPhone || !PHONE_E164_REGEX.test(normalizedPhone)) {
+      setFormError('Le numéro doit être au format international (+336...) ou commencer par 06/07.');
+      return;
+    }
+    if (!FRENCH_MOBILE_REGEX.test(normalizedPhone)) {
+      setFormError('Utilisez un mobile français (06, 07 ou +33 6/7).');
       return;
     }
     setFormError(null);
     setFormSaving(true);
     try {
-      const saved = await upsertClient({ ...formValues, phone: formValues.phone.trim() });
-      setClients((prev) => {
-        const filtered = prev.filter((item) => item.id !== saved.id);
-        return sortClientItems([...filtered, saved], sort);
-      });
+      const existing = await lookupClientByPhone(normalizedPhone);
+      if (existing && existing.id !== formValues.id) {
+        setDuplicate(existing);
+        setFormError('Ce numÃ©ro est déjà  associé à  un autre client.');
+        return;
+      }
+      const saved = await upsertClient({ ...formValues, phone: normalizedPhone });
+      if (formValues.id) {
+        setClients((prev) => {
+          const filtered = prev.filter((item) => item.id !== saved.id);
+          return sortClientItems([...filtered, saved], sort);
+        });
+      } else {
+        await fetchList({ reset: true });
+      }
       setFormVisible(false);
       alert.show('Client enregistré', `${saved.first_name} ${saved.last_name}`);
     } catch (error: any) {
@@ -290,7 +308,12 @@ export default function ClientsScreen() {
       return;
     }
     const timer = setTimeout(async () => {
-      const existing = await lookupClientByPhone(formValues.phone);
+      const normalized = normalizePhone(formValues.phone.trim());
+      if (!normalized) {
+        setDuplicate(null);
+        return;
+      }
+      const existing = await lookupClientByPhone(normalized);
       if (existing && existing.id !== formValues.id) {
         setDuplicate(existing);
       } else {
@@ -444,6 +467,7 @@ export default function ClientsScreen() {
           );
         })}
       </View>
+      <Text style={styles.sortHint}>Choisissez l'ordre d'affichage (dernière course, activité, alphabétique).</Text>
     </View>
   );
 
@@ -583,7 +607,7 @@ function ClientCard({
           </Text>
           <View style={styles.clientMetaRow}>
             <Text style={styles.clientMetaText}>
-              {client.total_courses} courses · {formatCurrency(client.lifetime_value)}
+              {client.total_courses} courses Â· {formatCurrency(client.lifetime_value)}
             </Text>
             {client.loyalty_status && (
               <View style={styles.loyaltyPill}>
@@ -728,6 +752,7 @@ const styles = StyleSheet.create({
   sortChipActive: { backgroundColor: COLORS.inputBg, borderColor: COLORS.azure },
   sortChipText: { color: COLORS.textMuted, fontWeight: '600' },
   sortChipTextActive: { color: COLORS.text, fontWeight: '700' },
+  sortHint: { color: COLORS.textMuted, fontSize: 12, marginBottom: 16 },
   card: {
     backgroundColor: COLORS.inputBg,
     borderRadius: RADII.card,
@@ -793,3 +818,4 @@ const styles = StyleSheet.create({
   },
   retryText: { color: COLORS.azure, fontWeight: '700' },
 });
+

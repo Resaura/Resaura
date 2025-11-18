@@ -18,12 +18,14 @@ import {
   Calendar,
   Gauge,
 } from 'lucide-react-native';
+import { useSwipeTabsNavigation } from '@/hooks/useSwipeTabsNavigation';
 
 export default function AdvancedScreen() {
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
   const safeTop = Math.max(60, insets.top + 20);
   const safeBottom = (insets.bottom || 0) + 8;
+  const swipeHandlers = useSwipeTabsNavigation('advanced');
   const [stats, setStats] = useState({
     totalReservations: 0,
     completedReservations: 0,
@@ -98,7 +100,7 @@ export default function AdvancedScreen() {
   };
 
   return (
-    <View style={[styles.container, { paddingBottom: safeBottom }]}>
+    <View {...swipeHandlers} style={[styles.container, { paddingBottom: safeBottom }]}>
       <View style={[styles.header, { paddingTop: safeTop }]}>
         <Text style={styles.title}>Fonctions avancées</Text>
       </View>

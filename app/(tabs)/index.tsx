@@ -2,7 +2,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, FlatList, Pressable, TextInput, Modal, Platform, Share, LayoutAnimation, UIManager, KeyboardAvoidingView, ScrollView, Linking, ActivityIndicator, PermissionsAndroid } from 'react-native';
 import type { TextInputProps } from 'react-native';
-import { Phone, Share2, Edit3, MapPin, Filter, RotateCcw, Star, LocateFixed, Clock3 } from 'lucide-react-native';
+import { Phone, Share2, Edit3, MapPin, Filter, RotateCcw, Star, LocateFixed, Clock3, Plane, TrainFront, Baby, Users, Luggage, ChevronRight } from 'lucide-react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS, RADII, SHADOW } from '@/lib/theme';
@@ -13,6 +13,8 @@ import { getGoogleReviewMessage } from '@/lib/preferences';
 import { useAppAlert } from '@/contexts/AlertContext';
 import CalendarSingle from '@/lib/ui/CalendarSingle';
 import TimePicker from '@/lib/ui/TimePicker';
+import { useSwipeTabsNavigation } from '@/hooks/useSwipeTabsNavigation';
+import FloatingActionButton from '@/components/ui/FloatingActionButton';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -44,7 +46,54 @@ function parseDropoffSegments(raw?: string | null) {
   return sanitized.split(STOP_SPLIT_REGEX).map(s => s.trim()).filter(Boolean);
 }
 
+function minutesToHHMM(minutes?: number | null) {
+  const value = typeof minutes === 'number' && !Number.isNaN(minutes) ? Math.max(0, minutes) : 0;
+  const h = Math.floor(value / 60);
+  const m = value % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+function hhmmToMinutes(value: string) {
+  const [hRaw, mRaw] = value.split(':');
+  const hours = Number.parseInt(hRaw, 10) || 0;
+  const mins = Number.parseInt(mRaw, 10) || 0;
+  return Math.max(0, hours * 60 + mins);
+}
+
+function formatDurationDisplay(minutes?: number | null) {
+  if (typeof minutes !== 'number' || Number.isNaN(minutes)) return '--';
+  const value = Math.max(0, Math.round(minutes));
+  if (value >= 60) {
+    const hours = Math.floor(value / 60);
+    const mins = value % 60;
+    return `${hours}h${String(mins).padStart(2, '0')} minutes`;
+  }
+  const unit = value === 1 ? 'minute' : 'minutes';
+  return `${value} ${unit}`;
+}
+
 type DateFilter = 'all' | 'today' | 'week' | 'custom';
+type DurationTarget = 'approach' | 'ride' | 'return';
+
+type QuickActionProps = {
+  label: string;
+  onPress: () => void;
+  variant?: 'info' | 'success' | 'danger' | 'ghost';
+};
+
+type IconType = React.ComponentType<{ size?: number; color?: string }>;
+
+type AddressRowProps = {
+  label: string;
+  value?: string | null;
+  color: string;
+  onPress: () => void;
+  textColor?: string;
+  dividerColor?: string;
+  force?: boolean;
+  placeholder?: string;
+  showLabel?: boolean;
+};
 
 const FILTER_OPTIONS: { key: DateFilter; label: string }[] = [
   { key: 'all', label: 'Tous' },
@@ -69,13 +118,13 @@ export default function BookingsScreen() {
   const listPaddingBottom = safeBottom + 72;
   const modalCardPadding = safeBottom + 16;
   const modalScrollPadding = safeBottom + 40;
-  const fabOffset = safeBottom + 8;
   const statusFilters = useMemo(() => {
     const order: StatusKey[] = ['a_venir', 'en_cours', 'terminee'];
     return order
       .map((key) => STATUSES.find((s) => s.key === key))
       .filter((item): item is typeof STATUSES[number] => Boolean(item));
   }, []);
+  const swipeHandlers = useSwipeTabsNavigation('index');
 
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState<StatusKey | undefined>('a_venir');
@@ -121,6 +170,9 @@ export default function BookingsScreen() {
     price_est: null as number|null,
     distance_km: null as number|null,
     duration_min: null as number|null,
+    approach_duration_min: null as number|null,
+    ride_duration_min: null as number|null,
+    return_duration_min: null as number|null,
     payment_mode: null as string|null,
   });
 
@@ -128,6 +180,10 @@ export default function BookingsScreen() {
   const [timeModal, setTimeModal] = useState(false);
   const [clientCreationLoading, setClientCreationLoading] = useState(false);
   const [passengersInput, setPassengersInput] = useState('1');
+  const [luggageInput, setLuggageInput] = useState('0');
+  const [durationPickerTarget, setDurationPickerTarget] = useState<DurationTarget | null>(null);
+  const [durationPickerValue, setDurationPickerValue] = useState('00:00');
+  const [isSaving, setIsSaving] = useState(false);
   const [returningId, setReturningId] = useState<string | null>(null);
   const [returnCountdowns, setReturnCountdowns] = useState<Record<string, number>>({});
   const [countdownTick, setCountdownTick] = useState(Date.now());
@@ -135,6 +191,46 @@ export default function BookingsScreen() {
   const [clientLookupLoading, setClientLookupLoading] = useState(false);
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
   const clientSearchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (clientSearchTimeout.current) {
+      clearTimeout(clientSearchTimeout.current);
+      clientSearchTimeout.current = null;
+    }
+    if (selectedClientId) {
+      setClientLookup([]);
+      setClientLookupLoading(false);
+      return;
+    }
+    const last = form.client_last.trim();
+    const first = form.client_first.trim();
+    const phone = form.phone.trim();
+    const querySource = last || first || phone;
+    if (!querySource || querySource.length < 2) {
+      setClientLookup([]);
+      setClientLookupLoading(false);
+      return;
+    }
+    clientSearchTimeout.current = setTimeout(async () => {
+      setClientLookupLoading(true);
+      try {
+        const results = await searchClients(querySource);
+        setClientLookup(results);
+      } catch (error) {
+        console.warn('[Bookings] searchClients error', error);
+        setClientLookup([]);
+      } finally {
+        setClientLookupLoading(false);
+        clientSearchTimeout.current = null;
+      }
+    }, 350);
+    return () => {
+      if (clientSearchTimeout.current) {
+        clearTimeout(clientSearchTimeout.current);
+        clientSearchTimeout.current = null;
+      }
+    };
+  }, [form.client_last, form.client_first, form.phone, selectedClientId]);
 
   const computedDateRange = useMemo(() => {
     const now = new Date();
@@ -179,48 +275,21 @@ export default function BookingsScreen() {
       if (reset) setData(items);
       else setData(prev => [...prev, ...items]);
     } catch {
-      alert.show('Erreur', "Impossible de charger les réservations.");
+      alert.show('Erreur', 'Impossible de charger les réservations.');
     } finally {
       setIsLoading(false);
     }
-  }, [query, status, computedDateRange, page]);
+  }, [alert, computedDateRange, page, pageSize, query, status]);
 
   const refresh = useCallback(async () => {
     setIsRefreshing(true);
     setPage(0);
-    try { await load(true); }
-    finally { setIsRefreshing(false); }
+    try {
+      await load(true);
+    } finally {
+      setIsRefreshing(false);
+    }
   }, [load]);
-
-  useFocusEffect(useCallback(() => {
-    setPage(0);
-    load(true);
-  }, [query, status, dateFilter, customFrom, customTo]));
-
-  useEffect(() => {
-    if (page > 0) load(false);
-  }, [page]);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const now = Date.now();
-      setCountdownTick(now);
-      setReturnCountdowns((prev) => {
-        if (!Object.keys(prev).length) return prev;
-        let mutated = false;
-        const next: Record<string, number> = {};
-        Object.entries(prev).forEach(([id, started]) => {
-          if (now - started < RETURN_WINDOW_MS) {
-            next[id] = started;
-          } else {
-            mutated = true;
-          }
-        });
-        return mutated ? next : prev;
-      });
-    }, 1000);
-    return () => clearInterval(interval);
-  }, []);
 
   const openCreate = () => {
     setEditing(null);
@@ -241,6 +310,9 @@ export default function BookingsScreen() {
       price_est: null,
       distance_km: null,
       duration_min: null,
+      approach_duration_min: null,
+      ride_duration_min: null,
+      return_duration_min: null,
       payment_mode: null,
     });
     setFormDate(new Date());
@@ -249,39 +321,7 @@ export default function BookingsScreen() {
     setSelectedClientId(null);
     setClientLookup([]);
     setPassengersInput('1');
-  };
-
-  const openEdit = (item: Reservation) => {
-    setEditing(item);
-    const dropSegments = parseDropoffSegments(item.dropoff);
-    const mainDropoff = dropSegments.length ? dropSegments[0] : (item.dropoff ?? '');
-    const extraStops = dropSegments.slice(1);
-    setForm({
-      client_first: item.client_first,
-      client_last: item.client_last,
-      phone: item.phone,
-      pickup: item.pickup,
-      dropoff: mainDropoff,
-      dropoffStops: extraStops,
-      passengers: item.passengers ?? 1,
-      luggage: item.luggage ?? 0,
-      child_seat: !!item.child_seat,
-      flight_no: item.flight_no ?? null,
-      train_no: (item as any).train_no ?? null,
-      transport_kind: item.flight_no ? 'flight' : ((item as any).train_no ? 'train' : 'none'),
-      note_client: item.note_client ?? '',
-      payment_mode: (item as any).payment_mode ?? null,
-      price_est: item.price_est ?? null,
-      distance_km: item.distance_km ?? null,
-      duration_min: item.duration_min ?? null,
-    });
-    const d = new Date(item.datetime);
-    setFormDate(d);
-    setFormTimeHHMM(d.toTimeString().slice(0,5));
-    setModalOpen(true);
-    setSelectedClientId(null);
-    setClientLookup([]);
-    setPassengersInput(String(item.passengers ?? 1));
+    setLuggageInput('0');
   };
 
   const closeModal = () => setModalOpen(false);
@@ -310,119 +350,43 @@ export default function BookingsScreen() {
       setCustomTo('');
     }
     setDateFilter(pendingDateFilter);
-    setPage(0);
     setFiltersOpen(false);
+    setPage(0);
+    void load(true);
   };
 
   const openFilterCalendarPicker = (target: 'from'|'to') => {
     setFilterCalendarTarget(target);
-    const base =
-      target === 'from'
-        ? (pendingRangeStart ?? pendingRangeEnd ?? new Date())
-        : (pendingRangeEnd ?? pendingRangeStart ?? new Date());
-    const normalized = new Date(base);
-    normalized.setHours(0, 0, 0, 0);
-    setFilterCalendarValue(normalized);
+    const fallback = target === 'from' ? (pendingRangeStart ?? pendingRangeEnd ?? new Date()) : (pendingRangeEnd ?? pendingRangeStart ?? new Date());
+    setFilterCalendarValue(fallback);
     setFilterCalendarOpen(true);
   };
 
   const closeFilterCalendarPicker = () => setFilterCalendarOpen(false);
 
-  const confirmFilterCalendarPicker = (picked: Date) => {
-    const normalized = new Date(picked);
-    normalized.setHours(0, 0, 0, 0);
+  const confirmFilterCalendarPicker = (value: Date) => {
+    const nextDate = new Date(value);
     if (filterCalendarTarget === 'from') {
-      setPendingRangeStart(normalized);
-      if (pendingRangeEnd && normalized > pendingRangeEnd) {
-        setPendingRangeEnd(null);
+      setPendingRangeStart(nextDate);
+      if (pendingRangeEnd && nextDate > pendingRangeEnd) {
+        setPendingRangeEnd(nextDate);
       }
     } else {
-      if (pendingRangeStart && normalized < pendingRangeStart) {
-        setPendingRangeStart(normalized);
-        setPendingRangeEnd(null);
-      } else {
-        setPendingRangeEnd(normalized);
+      setPendingRangeEnd(nextDate);
+      if (pendingRangeStart && nextDate < pendingRangeStart) {
+        setPendingRangeStart(nextDate);
       }
     }
     setFilterCalendarOpen(false);
   };
 
-  const addDropoffStep = () => {
-    setForm(f => ({ ...f, dropoffStops: [...(f.dropoffStops ?? []), ''] }));
-  };
-
-  const updateDropoffStep = (index: number, value: string) => {
-    setForm(f => {
-      const steps = [...(f.dropoffStops ?? [])];
-      steps[index] = value;
-      return { ...f, dropoffStops: steps };
-    });
-  };
-
-  const removeDropoffStep = (index: number) => {
-    setForm(f => {
-      const steps = [...(f.dropoffStops ?? [])];
-      steps.splice(index, 1);
-      return { ...f, dropoffStops: steps };
-    });
-  };
-
-  useEffect(() => {
-    return () => {
-      if (clientSearchTimeout.current) {
-        clearTimeout(clientSearchTimeout.current);
-      }
-    };
-  }, []);
-
-  const handleClientNameChange = (value: string, field: ClientNameField) => {
+  const handleClientNameChange = (value: string, field: 'first' | 'last') => {
+    const formatted = value.replace(/\s+/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
     setSelectedClientId(null);
-    setForm((prev) => {
-      const next = {
-        ...prev,
-        client_first: field === 'first' ? value : prev.client_first,
-        client_last: field === 'last' ? value : prev.client_last,
-      };
-      const query = `${next.client_last} ${next.client_first}`.trim();
-      triggerClientLookup(query);
-      return next;
-    });
-  };
-
-  const triggerClientLookup = (query: string) => {
-    if (clientSearchTimeout.current) {
-      clearTimeout(clientSearchTimeout.current);
-    }
-    if (!query || query.trim().length < 2) {
-      setClientLookup([]);
-      setClientLookupLoading(false);
-      return;
-    }
-    setClientLookupLoading(true);
-    clientSearchTimeout.current = setTimeout(async () => {
-      try {
-        const results = await searchClients(query.trim());
-        setClientLookup(results);
-      } finally {
-        setClientLookupLoading(false);
-      }
-    }, 350);
-  };
-
-  const selectClientSuggestion = (client: ClientSummary) => {
-    if (clientSearchTimeout.current) {
-      clearTimeout(clientSearchTimeout.current);
-      clientSearchTimeout.current = null;
-    }
-    setSelectedClientId(client.id);
     setForm((prev) => ({
       ...prev,
-      client_first: client.first_name,
-      client_last: client.last_name,
-      phone: client.phone,
+      [field === 'first' ? 'client_first' : 'client_last']: formatted,
     }));
-    setClientLookup([]);
-    setClientLookupLoading(false);
   };
 
   const handlePassengersChange = (text: string) => {
@@ -434,258 +398,289 @@ export default function BookingsScreen() {
     }));
   };
 
-  type ClientSuggestion = { first_name: string; last_name: string; phone: string };
-
-
-  const applyClientInfoToForm = (client: { first_name: string; last_name: string; phone: string }) => {
+  const handleLuggageChange = (text: string) => {
+    const sanitized = text.replace(/[^0-9]/g, '');
+    setLuggageInput(sanitized);
     setForm((prev) => ({
       ...prev,
-      client_first: client.first_name,
-      client_last: client.last_name,
-      phone: client.phone,
+      luggage: sanitized === '' ? 0 : Number(sanitized),
     }));
   };
 
-  useFocusEffect(
-    useCallback(() => {
-      const payload = (globalThis as any).__RESAURA_CLIENT_PREFILL;
-      if (payload) {
-        setForm((prev) => ({
-          ...prev,
-          client_first: payload.first_name ?? '',
-          client_last: payload.last_name ?? '',
-          phone: payload.phone ?? '',
-        }));
-        setSelectedClientId(null);
-        (globalThis as any).__RESAURA_CLIENT_PREFILL = null;
+  const handlePhoneChange = (text: string) => {
+    setSelectedClientId(null);
+    setForm((prev) => ({
+      ...prev,
+      phone: text,
+    }));
+  };
+
+  const addDropoffStep = () => {
+    setForm((prev) => ({
+      ...prev,
+      dropoffStops: [...(prev.dropoffStops ?? []), ''],
+    }));
+  };
+
+  const updateDropoffStep = (index: number, value: string) => {
+    setForm((prev) => {
+      const steps = [...(prev.dropoffStops ?? [])];
+      steps[index] = value;
+      return { ...prev, dropoffStops: steps };
+    });
+  };
+
+  const removeDropoffStep = (index: number) => {
+    setForm((prev) => {
+      const steps = [...(prev.dropoffStops ?? [])];
+      steps.splice(index, 1);
+      return { ...prev, dropoffStops: steps };
+    });
+  };
+
+  const selectClientSuggestion = (client: ClientSummary) => {
+    setSelectedClientId(client.id);
+    setClientLookup([]);
+    setClientLookupLoading(false);
+    setForm((prev) => ({
+      ...prev,
+      client_first: client.first_name ?? '',
+      client_last: client.last_name ?? '',
+      phone: client.phone ?? '',
+    }));
+  };
+
+  const openEdit = (item: Reservation) => {
+    const datetime = new Date(item.datetime);
+    setFormDate(datetime);
+    setFormTimeHHMM(datetime.toTimeString().slice(0, 5));
+    const dropSegments = parseDropoffSegments(item.dropoff);
+    const [primary, ...stops] = dropSegments.length ? dropSegments : [item.dropoff ?? ''];
+    setForm({
+      client_first: item.client_first ?? '',
+      client_last: item.client_last ?? '',
+      phone: item.phone ?? '',
+      pickup: item.pickup ?? '',
+      dropoff: primary ?? '',
+      dropoffStops: stops,
+      passengers: item.passengers ?? 1,
+      luggage: item.luggage ?? 0,
+      child_seat: !!item.child_seat,
+      flight_no: item.flight_no ?? null,
+      train_no: item.train_no ?? null,
+      transport_kind: item.transport_kind ?? 'none',
+      note_client: item.note_client ?? '',
+      price_est: item.price_est ?? null,
+      distance_km: item.distance_km ?? null,
+      duration_min: item.duration_min ?? null,
+      approach_duration_min: item.approach_duration_min ?? null,
+      ride_duration_min: item.ride_duration_min ?? null,
+      return_duration_min: item.return_duration_min ?? null,
+      payment_mode: item.payment_mode ?? null,
+    });
+    setPassengersInput(String(item.passengers ?? 1));
+    setLuggageInput(String(item.luggage ?? 0));
+    setEditing(item);
+    setClientLookup([]);
+    setSelectedClientId(null);
+    setModalOpen(true);
+  };
+
+  const openDurationPicker = (target: DurationTarget) => {
+    setDurationPickerTarget(target);
+    const currentValue =
+      target === 'approach'
+        ? form.approach_duration_min
+        : target === 'ride'
+          ? form.ride_duration_min
+          : form.return_duration_min;
+    setDurationPickerValue(minutesToHHMM(currentValue ?? 0));
+  };
+
+  const applyDurationValue = (target: DurationTarget, minutes: number) => {
+    setForm((prev) => {
+      if (target === 'approach') {
+        return { ...prev, approach_duration_min: minutes };
       }
-    }, []),
-  );
-
-  const createClientFromReservation = async (info: ClientSuggestion) => {
-    setClientCreationLoading(true);
-    try {
-      const result = await quickCreateClient({
-        first_name: info.first_name,
-        last_name: info.last_name,
-        phone: info.phone,
-      });
-
-      if (result.status === 'error') {
-        alert.show('Ajout client impossible', result.error ?? 'Veuillez réessayer plus tard.');
-        return;
+      if (target === 'ride') {
+        return { ...prev, ride_duration_min: minutes };
       }
-
-      if (result.status === 'duplicate') {
-        alert.show('Client déjà existant', `Le numéro est déjà associé à ${result.client.last_name} ${result.client.first_name}. Réutiliser ses informations ?`, {
-          actions: [
-            { text: 'Annuler', variant: 'ghost' },
-            {
-              text: 'Réutiliser',
-              onPress: () => {
-                applyClientInfoToForm(result.client);
-              },
-            },
-          ],
-        });
-        return;
-      }
-
-      applyClientInfoToForm(result.client);
-      alert.show('Client ajouté', `${result.client.first_name} ${result.client.last_name} est maintenant dans l'onglet Clients.`);
-    } catch (error) {
-      console.error('[bookings.createClientFromReservation]', error);
-      alert.show('Ajout client impossible', 'Une erreur inattendue est survenue.');
-    } finally {
-      setClientCreationLoading(false);
-    }
+      return { ...prev, return_duration_min: minutes };
+    });
+    setDurationPickerTarget(null);
+    setDurationPickerValue(minutesToHHMM(minutes));
   };
 
-  const openExternalUrl = async (url: string, failMessage: string) => {
-    try {
-      const supported = await Linking.canOpenURL(url);
-      if (!supported) throw new Error('unsupported');
-      await Linking.openURL(url);
-    } catch {
-      alert.show('Action impossible', failMessage);
-    }
-  };
-
-  const dialClient = async (phoneNumber?: string | null) => {
-    if (!phoneNumber?.trim()) {
-      alert.show('Numéro indisponible', 'Aucun numéro pour ce client.');
-      return;
-    }
-    try {
-      await Linking.openURL(`tel:${phoneNumber}`);
-    } catch {
-      alert.show('Action impossible', 'Impossible d\'ouvrir l\'application Téléphone.');
-    }
-  };
-
-  const shareReservationDetails = async (item: Reservation) => {
-    const dt = new Date(item.datetime);
-    const date = dt.toLocaleDateString();
-    const time = dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const summary = [
-      `Course du ${date} ${time}`,
-      `Client : ${item.client_first} ${item.client_last}`,
-      `Téléphone : ${item.phone}`,
-      `Départ : ${item.pickup}`,
-      `Arrivée : ${item.dropoff}`,
-      `Passagers : ${item.passengers ?? 1}`,
-      `Bagages : ${item.luggage ?? 0}`,
-    ].join('\n');
-    try {
-      await Share.share({ message: summary });
-    } catch {
-      alert.show('Partage impossible', 'Impossible d\'ouvrir la feuille de partage.');
-    }
-  };
-
-  const navigateToTransaction = useCallback((reservation: Reservation) => {
-    const payload = {
-      reservationId: reservation.id,
-      amount: reservation.price_est ?? null,
-      clientName: `${reservation.client_first} ${reservation.client_last}`.trim(),
-      pickup: reservation.pickup,
-      dropoff: reservation.dropoff,
-      datetime: reservation.datetime,
-    };
-    const encoded = encodeURIComponent(JSON.stringify(payload));
-    router.push({ pathname: '/(tabs)/finance', params: { txPrefill: encoded } });
-  }, [router]);
-
-  const sendGoogleReview = async (item: Reservation) => {
-    if (!item.phone?.trim()) {
-      alert.show('Numéro indisponible', 'Aucun numéro pour envoyer le SMS.');
-      return;
-    }
-    try {
-      const template = await getGoogleReviewMessage();
-      const message = template.replace('{client}', `${item.client_first} ${item.client_last}`.trim());
-      const encodedBody = encodeURIComponent(message);
-      const phone = item.phone.trim();
-      const smsUrl = Platform.select({
-        ios: `sms:&addresses=${encodeURIComponent(phone)}&body=${encodedBody}`,
-        android: `sms:${phone}?body=${encodedBody}`,
-        default: `sms:${phone}?body=${encodedBody}`,
-      });
-      if (!smsUrl) throw new Error('unsupported');
-      const can = await Linking.canOpenURL(smsUrl);
-      if (!can) throw new Error('unsupported');
-      await Linking.openURL(smsUrl);
-    } catch {
-      alert.show('SMS indisponible', 'Impossible d"ouvrir l"application Messages.');
-    }
-  };
-
-  const handleAddressPress = async (label: string, displayAddress?: string | null, navAddress?: string | null) => {
-    const target = (navAddress ?? displayAddress)?.trim();
+  const handleAddressPress = (label: string, value?: string | null, navTarget?: string | null) => {
+    const target = (navTarget || value || '').trim();
     if (!target) {
-      alert.show('Adresse manquante', "Veuillez compléter cette adresse avant d'ouvrir un GPS.");
+      alert.show('Adresse indisponible', `Impossible d'afficher ${label}.`);
       return;
     }
     const encoded = encodeURIComponent(target);
-    const googleUri = `comgooglemaps://?daddr=${encoded}&directionsmode=driving`;
-    const wazeUri = `waze://?q=${encoded}&navigate=yes`;
-    if (await Linking.canOpenURL(googleUri)) {
-      Linking.openURL(googleUri);
+    const fallback = `https://www.google.com/maps/search/?api=1&query=${encoded}`;
+    const nativeUrl = Platform.select({
+      ios: `http://maps.apple.com/?q=${encoded}`,
+      android: `geo:0,0?q=${encoded}`,
+      default: fallback,
+    }) ?? fallback;
+    Linking.openURL(nativeUrl).catch(() => {
+      Linking.openURL(fallback).catch(() => {
+        alert.show('Navigation impossible', `Impossible d'ouvrir ${label}.`);
+      });
+    });
+  };
+
+  const dialClient = (phone?: string | null) => {
+    const sanitized = phone?.replace(/[^\d+]/g, '');
+    if (!sanitized) {
+      alert.show('Numéro indisponible', 'Aucun numéro valide pour ce client.');
       return;
     }
-    if (await Linking.canOpenURL(wazeUri)) {
-      Linking.openURL(wazeUri);
-      return;
-    }
-    const googleWeb = `https://www.google.com/maps/search/?api=1&query=${encoded}`;
-    const wazeWeb = `https://waze.com/ul?q=${encoded}&navigate=yes`;
+    Linking.openURL(`tel:${sanitized}`).catch(() => {
+      alert.show('Appel impossible', 'Impossible de lancer l’appel.');
+    });
+  };
+
+  const shareReservationDetails = async (item: Reservation) => {
     try {
-      await Linking.openURL(googleWeb);
-    } catch {
-      try {
-        await Linking.openURL(wazeWeb);
-      } catch {
-        alert.show('Navigation impossible', 'Impossible d"ouvrir Google Maps ou Waze sur cet appareil.');
-      }
+      const dt = new Date(item.datetime);
+      const dropSegments = parseDropoffSegments(item.dropoff);
+      const [arrival, ...stops] = dropSegments.length ? dropSegments : [item.dropoff ?? ''];
+      const lines = [
+        `Course du ${dt.toLocaleDateString()} à ${dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+        `${item.client_last} ${item.client_first}`.trim(),
+        item.pickup ? `Départ : ${item.pickup}` : null,
+        ...stops.map((stop, index) => `Étape ${index + 1} : ${stop}`),
+        arrival ? `Arrivée : ${arrival}` : null,
+        item.note_client?.trim() ? `Commentaire : ${item.note_client.trim()}` : null,
+      ].filter(Boolean) as string[];
+      await Share.share({ message: lines.join('\n') });
+    } catch (error) {
+      console.warn('[Bookings] shareReservationDetails error', error);
+      alert.show('Partage impossible', 'Impossible de partager cette réservation.');
+    }
+  };
+
+  const sendGoogleReview = async (item: Reservation) => {
+    try {
+      const template = await getGoogleReviewMessage();
+      const clientName = `${item.client_first} ${item.client_last}`.trim();
+      const personalized = template
+        .replace(/\{\{\s*client\s*\}\}/gi, clientName || 'client')
+        .replace(/\{client\}/gi, clientName || 'client');
+      await Share.share({ message: personalized });
+    } catch (error) {
+      console.warn('[Bookings] sendGoogleReview error', error);
+      alert.show('Partage impossible', 'Impossible d\'ouvrir le partage.');
+    }
+  };
+
+  const navigateToTransaction = (item: Reservation) => {
+    try {
+      const dropSegments = parseDropoffSegments(item.dropoff);
+      const dropoffPrimary = dropSegments.length ? dropSegments[0] : (item.dropoff ?? '');
+      const payload = {
+        reservationId: item.id,
+        amount: item.price_est ?? null,
+        clientName: `${item.client_first} ${item.client_last}`.trim() || undefined,
+        pickup: item.pickup,
+        dropoff: dropoffPrimary,
+        datetime: item.datetime,
+      };
+      const encoded = encodeURIComponent(JSON.stringify(payload));
+      router.push({ pathname: '/(tabs)/finance', params: { txPrefill: encoded } });
+    } catch (error) {
+      console.warn('[Bookings] navigateToTransaction error', error);
+      alert.show('Navigation impossible', 'Redirection vers Finance impossible.');
     }
   };
 
   const saveForm = async () => {
-    if (!form.client_first.trim() || !form.client_last.trim() || !form.phone.trim() || !form.pickup.trim() || !form.dropoff.trim()) {
-      alert.show('Champs manquants', 'Merci de remplir tous les champs requis.');
+    if (isSaving) return;
+    const clientFirst = form.client_first.trim();
+    const clientLast = form.client_last.trim();
+    const phone = form.phone.trim();
+    const pickup = form.pickup.trim();
+    const dropSegments = [form.dropoff, ...(form.dropoffStops ?? [])]
+      .map((segment) => segment.trim())
+      .filter(Boolean);
+    if (!clientLast || !clientFirst || !phone || !pickup || dropSegments.length === 0) {
+      alert.show('Champs manquants', 'Complétez les informations obligatoires.');
       return;
     }
-    const clientFirst = form.client_first.trim();
-    const clientLastRaw = form.client_last.trim();
-    const phoneValue = form.phone.trim();
-    // combine date + time
-    const [h, m] = formTimeHHMM.split(':').map(n=>parseInt(n,10));
-    const dt = new Date(formDate);
-    dt.setHours(h||0, m||0, 0, 0);
-
-    const stops = (form.dropoffStops ?? []).map(s => s.trim()).filter(Boolean);
-    const primaryDropoff = form.dropoff.trim();
-    const dropoffValue = stops.length ? [primaryDropoff, ...stops].join(STOP_SEPARATOR) : primaryDropoff;
-
-    const passengersCount = Number.isFinite(Number(form.passengers)) ? Number(form.passengers) : 0;
-
+    const [hoursRaw, minsRaw] = formTimeHHMM.split(':');
+    const hours = Number(hoursRaw);
+    const minutes = Number(minsRaw);
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes)) {
+      alert.show('Horaire invalide', 'Sélectionnez une heure valide.');
+      return;
+    }
+    const datetime = new Date(formDate);
+    datetime.setHours(hours, minutes, 0, 0);
     const payload: ReservationCreate = {
       client_first: clientFirst,
-      client_last: clientLastRaw.toUpperCase(),
-      phone: phoneValue,
-      pickup: form.pickup.trim(),
-      dropoff: dropoffValue,
-      datetime: dt.toISOString(),
-      passengers: Math.max(0, passengersCount),
-      luggage: Number(form.luggage) || 0,
-      child_seat: !!form.child_seat,
+      client_last: clientLast,
+      phone,
+      pickup,
+      dropoff: dropSegments.join(STOP_SEPARATOR),
+      datetime: datetime.toISOString(),
+      passengers: form.passengers,
+      luggage: form.luggage,
+      child_seat: form.child_seat,
+      flight_no: form.transport_kind === 'flight' ? (form.flight_no?.trim() || null) : null,
+      train_no: form.transport_kind === 'train' ? (form.train_no?.trim() || null) : null,
+      transport_kind: form.transport_kind,
+      note_client: form.note_client?.trim() || null,
+      price_est: form.price_est,
+      distance_km: form.distance_km,
+      duration_min: form.duration_min,
+      approach_duration_min: form.approach_duration_min,
+      ride_duration_min: form.ride_duration_min,
+      return_duration_min: form.return_duration_min,
+      payment_mode: form.payment_mode,
     };
-
-    const noteClient = (form.note_client || '').trim();
-    if (noteClient) {
-      payload.note_client = noteClient;
-    }
-
-    if (form.transport_kind === 'flight') {
-      const flight = (form.flight_no || '').trim();
-      if (flight) {
-        payload.flight_no = flight;
-      }
-    }
-
-    if (form.transport_kind === 'train') {
-      const train = (form.train_no || '').trim();
-      if (train) {
-        payload.train_no = train;
-      }
-    }
-
-    if (form.payment_mode) {
-      payload.payment_mode = form.payment_mode as ReservationCreate['payment_mode'];
-    }
-    if (form.price_est != null && !Number.isNaN(Number(form.price_est))) {
-      payload.price_est = Number(form.price_est);
-    }
-    if (form.distance_km != null && !Number.isNaN(Number(form.distance_km))) {
-      payload.distance_km = Number(form.distance_km);
-    }
-    if (form.duration_min != null && !Number.isNaN(Number(form.duration_min))) {
-      payload.duration_min = Number(form.duration_min);
-    }
-
+    setIsSaving(true);
     try {
+      if (!editing && !selectedClientId) {
+        try {
+          setClientCreationLoading(true);
+          await quickCreateClient({
+            first_name: clientFirst,
+            last_name: clientLast,
+            phone,
+          });
+        } catch (error) {
+          console.warn('[Bookings] quickCreateClient error', error);
+        } finally {
+          setClientCreationLoading(false);
+        }
+      }
       const ok = editing
         ? await updateReservation(editing.id, payload as ReservationUpdate)
         : await createReservation(payload);
-
-      if (!ok) { alert.show('Erreur', editing ? 'La mise à jour a échoué.' : 'La création a échoué.'); return; }
-      closeModal();
-      refresh();
-      if (!editing && !selectedClientId && !clientCreationLoading) {
-        void createClientFromReservation({ first_name: clientFirst, last_name: clientLastRaw, phone: phoneValue });
+      if (!ok) {
+        alert.show('Erreur', editing ? 'Mise à jour impossible.' : 'Création impossible.');
+        return;
       }
-    } catch {
-      alert.show('Erreur', 'Une erreur est survenue lors de la sauvegarde.');
+      closeModal();
+      setEditing(null);
+      setClientLookup([]);
+      setSelectedClientId(null);
+      await refresh();
+      alert.show(
+        editing ? 'Réservation mise à jour' : 'Réservation créée',
+        editing ? 'Les modifications ont été enregistrées.' : 'La réservation a été ajoutée à la liste.',
+      );
+      alert.show(
+        editing ? 'Reservation mise à jour' : 'Reservation créée',
+        editing ? 'Les modifications ont été enregistrées.' : 'La réservation a été ajoutée à votre planning.',
+      );
+    } catch (error) {
+      console.warn('[Bookings] saveForm error', error);
+      alert.show('Erreur', 'Impossible d\'enregistrer la réservation.');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -772,13 +767,13 @@ export default function BookingsScreen() {
     }
   };
 
-
   const renderItem = ({ item }: { item: Reservation }) => {
     const status = (item.status as StatusKey) || 'a_venir';
     const tone = getCardTone(status);
     const dropSegments = parseDropoffSegments(item.dropoff);
-    const dropoffDisplay = dropSegments.length ? dropSegments.join(STOP_SEPARATOR) : (item.dropoff ?? '');
-    const dropoffNavTarget = dropSegments.length ? dropSegments[dropSegments.length - 1] : (item.dropoff ?? '');
+    const dropoffPrimary = dropSegments.length ? dropSegments[0] : (item.dropoff ?? '');
+    const dropoffStops = dropSegments.slice(1);
+    const dropoffNavTarget = dropoffPrimary;
     const dt = new Date(item.datetime);
     const dateText = dt.toLocaleDateString();
     const timeText = dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -796,6 +791,52 @@ export default function BookingsScreen() {
     const showReturnCountdown = status === 'en_cours' && returnCountdownRemaining > 0;
     const countdownRatio = showReturnCountdown ? returnCountdownRemaining / RETURN_WINDOW_MS : 0;
     const returnDisabled = returning || (status === 'en_cours' && countdownStart && returnCountdownRemaining <= 0);
+    const metaBadges: Array<{ key: string; icon: typeof Phone; label: string }> = [];
+    if (item.transport_kind === 'flight' || (item.flight_no ?? '').trim()) {
+      metaBadges.push({
+        key: 'flight',
+        icon: Plane,
+        label: item.flight_no?.trim() ? `Vol ${item.flight_no.trim()}` : 'Trajet avion',
+      });
+    }
+    if (item.transport_kind === 'train' || (item.train_no ?? '').trim()) {
+      metaBadges.push({
+        key: 'train',
+        icon: TrainFront,
+        label: item.train_no?.trim() ? `Train ${item.train_no.trim()}` : 'Trajet train',
+      });
+    }
+    if (item.child_seat) {
+      metaBadges.push({
+        key: 'child-seat',
+        icon: Baby,
+        label: 'Siège enfant',
+      });
+    }
+    const passengerCount = Number.isFinite(item.passengers) ? Number(item.passengers) : 0;
+    if (passengerCount > 0) {
+      metaBadges.push({
+        key: 'passengers',
+        icon: Users,
+        label: passengerCount > 1 ? `${passengerCount} passagers` : '1 passager',
+      });
+    }
+    const luggageCount = Number.isFinite(item.luggage) ? Number(item.luggage) : 0;
+    if (luggageCount > 0) {
+      metaBadges.push({
+        key: 'luggage',
+        icon: Luggage,
+        label: luggageCount > 1 ? `${luggageCount} bagages` : '1 bagage',
+      });
+    }
+    const durationSegments = [
+      item.approach_duration_min,
+      item.ride_duration_min,
+      item.return_duration_min,
+    ];
+    const hasDurations = durationSegments.some(
+      (value) => typeof value === 'number' && value > 0,
+    );
 
     return (
       <View style={cardStyle}>
@@ -807,7 +848,7 @@ export default function BookingsScreen() {
         <View style={styles.cardHeaderRow}>
           <View style={styles.cardHeaderLeft}>
             <Text style={[styles.cardTitle, { color: tone.textColor }]}>{item.client_last} {item.client_first}</Text>
-            <Text style={[styles.cardSubtitle, { color: tone.mutedColor }]}>{dateText} ?? {timeText}</Text>
+            <Text style={[styles.cardSubtitle, { color: tone.mutedColor }]}>{dateText} · {timeText}</Text>
           </View>
           <View style={styles.cardHeaderRight}>
             {canReturn && (
@@ -846,18 +887,61 @@ export default function BookingsScreen() {
         </View>
         <AddressRow
           label="Départ"
+          value={item.pickup}
           color={COLORS.pickupAccent}
           onPress={() => handleAddressPress('Départ', item.pickup, item.pickup)}
           textColor={tone.textColor}
           dividerColor={tone.dividerColor}
+          showLabel={false}
         />
+        {dropoffStops.map((stop, idx) => (
+          <AddressRow
+            key={`${item.id}-stop-${idx}`}
+            label={`Étape ${idx + 1}`}
+            value={stop}
+            color={COLORS.azure}
+            onPress={() => handleAddressPress(`Étape ${idx + 1}`, stop, stop)}
+            textColor={tone.textColor}
+            dividerColor={tone.dividerColor}
+            showLabel={false}
+          />
+        ))}
         <AddressRow
           label="Arrivée"
+          value={dropoffPrimary}
           color={COLORS.dropoffAccent}
-          onPress={() => handleAddressPress('Arrivée', dropoffDisplay, dropoffNavTarget)}
+          onPress={() => handleAddressPress('Arrivée', dropoffPrimary, dropoffNavTarget)}
           textColor={tone.textColor}
           dividerColor={tone.dividerColor}
+          showLabel={false}
         />
+        {hasDurations && (
+          <View style={[styles.durationChain, tone.dividerColor && { borderTopColor: tone.dividerColor }]}>
+            {durationSegments.map((value, idx) => (
+              <React.Fragment key={`${item.id}-duration-${idx}`}>
+                <View style={styles.durationChipCard}>
+                  <Text style={[styles.durationChipText, { color: tone.textColor }]}>{formatDurationDisplay(value)}</Text>
+                </View>
+                {idx < durationSegments.length - 1 && (
+                  <ChevronRight size={14} color={tone.textColor} />
+                )}
+              </React.Fragment>
+            ))}
+          </View>
+        )}
+        {metaBadges.length > 0 && (
+          <View style={[styles.tripMetaRow, tone.dividerColor && { borderTopColor: tone.dividerColor }]}>
+            {metaBadges.map((badge) => (
+              <View
+                key={`${item.id}-${badge.key}`}
+                style={[styles.tripMetaChip, { borderColor: tone.dividerColor, backgroundColor: tone.commentBg }]}
+              >
+                <badge.icon size={14} color={tone.textColor} />
+                <Text style={[styles.tripMetaText, { color: tone.textColor }]}>{badge.label}</Text>
+              </View>
+            ))}
+          </View>
+        )}
 
         {comment && (
           <View style={[styles.commentBox, { backgroundColor: tone.commentBg, borderColor: tone.commentBorder }]}>
@@ -893,7 +977,7 @@ export default function BookingsScreen() {
   };
 
 return (
-    <View style={[styles.container, { paddingTop: safeTop, paddingBottom: safeBottom }]}>
+    <View {...swipeHandlers} style={[styles.container, { paddingTop: safeTop, paddingBottom: safeBottom }]}>
       <View style={styles.statusFilterRow}>
         <View style={styles.statusChipsWrap}>
           {statusFilters.map((s) => (
@@ -1022,10 +1106,7 @@ return (
         }
       />
 
-      {/* Boutons flottants */}
-      <View style={[styles.fabColumn, { bottom: fabOffset }]}>
-        <Pressable onPress={openCreate} style={styles.fab}><Text style={styles.fabText}>+</Text></Pressable>
-      </View>
+      <FloatingActionButton onPress={openCreate} accessibilityLabel="Créer une réservation" />
 
       {/* Modale create/edit */}
       <Modal visible={modalOpen} animationType="slide" onRequestClose={closeModal} transparent>
@@ -1067,7 +1148,7 @@ return (
                   ))}
                 </View>
               )}
-              <Input label="Téléphone" value={form.phone} onChangeText={(v)=>setForm(f=>({...f, phone:v}))} keyboardType="phone-pad" required />
+              <Input label="Téléphone" value={form.phone} onChangeText={handlePhoneChange} keyboardType="phone-pad" required />
               <AddressInput label="Adresse de départ" value={form.pickup} onChangeText={(v)=>setForm(f=>({...f, pickup:v}))} required />              <View style={styles.stepInlineRow}>
                 <Pressable style={styles.addStepInline} onPress={addDropoffStep}>
                   <Text style={styles.addStepInlineText}>+ étape</Text>
@@ -1103,9 +1184,27 @@ return (
                 </Pressable>
               </Row>
 
+              <View style={styles.durationSection}>
+                <Text style={styles.label}>Temps de trajet</Text>
+                <View style={styles.durationRow}>
+                  <Pressable style={styles.durationBox} onPress={() => openDurationPicker('approach')}>
+                    <Text style={styles.durationLabel}>Approche</Text>
+                    <Text style={styles.durationValue}>{formatDurationDisplay(form.approach_duration_min)}</Text>
+                  </Pressable>
+                  <Pressable style={styles.durationBox} onPress={() => openDurationPicker('ride')}>
+                    <Text style={styles.durationLabel}>Course</Text>
+                    <Text style={styles.durationValue}>{formatDurationDisplay(form.ride_duration_min)}</Text>
+                  </Pressable>
+                  <Pressable style={styles.durationBox} onPress={() => openDurationPicker('return')}>
+                    <Text style={styles.durationLabel}>Retour</Text>
+                    <Text style={styles.durationValue}>{formatDurationDisplay(form.return_duration_min)}</Text>
+                  </Pressable>
+                </View>
+              </View>
+
               <Row>
                 <Input label="Passagers" value={passengersInput} onChangeText={handlePassengersChange} keyboardType="number-pad" half required />
-                <Input label="Bagages" value={String(form.luggage)} onChangeText={(v)=>setForm(f=>({...f, luggage:Number(v)||0}))} keyboardType="number-pad" half required />
+                <Input label="Bagages" value={luggageInput} onChangeText={handleLuggageChange} keyboardType="number-pad" half required />
               </Row>
 
               <Row>
@@ -1134,8 +1233,16 @@ return (
               <Pressable style={[styles.modalActionBtn, styles.modalActionGhost]} onPress={closeModal}>
                 <Text style={styles.modalActionGhostText}>Annuler</Text>
               </Pressable>
-              <Pressable style={[styles.modalActionBtn, styles.modalActionPrimary]} onPress={saveForm}>
-                <Text style={styles.modalActionPrimaryText}>{editing ? 'Enregistrer' : 'Créer'}</Text>
+              <Pressable
+                style={[styles.modalActionBtn, styles.modalActionPrimary, isSaving && { opacity: 0.7 }]}
+                onPress={saveForm}
+                disabled={isSaving}
+              >
+                {isSaving ? (
+                  <ActivityIndicator color={COLORS.darkText} />
+                ) : (
+                  <Text style={styles.modalActionPrimaryText}>{editing ? 'Enregistrer' : 'Créer'}</Text>
+                )}
               </Pressable>
             </View>
           </View>
@@ -1163,6 +1270,23 @@ return (
         onClose={()=>setTimeModal(false)}
         onConfirm={(v)=>setFormTimeHHMM(v)}
       />
+      <TimePicker
+        visible={durationPickerTarget !== null}
+        value={durationPickerValue}
+        onClose={() => setDurationPickerTarget(null)}
+        onConfirm={(value) => {
+          if (!durationPickerTarget) return;
+          const minutes = hhmmToMinutes(value);
+          applyDurationValue(durationPickerTarget, minutes);
+        }}
+        label={
+          durationPickerTarget === 'approach'
+            ? "Temps d'approche"
+            : durationPickerTarget === 'ride'
+              ? 'Temps de course'
+              : "Temps de retour"
+        }
+      />
       {clientCreationLoading && (
         <View style={styles.clientOverlay} pointerEvents="auto">
           <View style={styles.clientOverlayBox}>
@@ -1175,13 +1299,9 @@ return (
   );
 }
 
-type QuickActionProps = {
-  label: string;
-  onPress: () => void;
-  variant?: 'info' | 'success' | 'danger' | 'ghost';
-};
 
-function QuickActionButton({ label, onPress, variant = 'info' }: QuickActionProps) {
+function QuickActionButton(props: QuickActionProps) {
+  const { label, onPress, variant = 'info' } = props;
   const variantStyle = {
     info: styles.quickAction_info,
     success: styles.quickAction_success,
@@ -1202,9 +1322,9 @@ function QuickActionButton({ label, onPress, variant = 'info' }: QuickActionProp
   );
 }
 
-type IconType = React.ComponentType<{ size?: number; color?: string }>;
+type UtilityIconButtonProps = { label: string; icon: IconType; onPress: () => void };
 
-function UtilityIconButton({ label, icon: Icon, onPress }: { label: string; icon: IconType; onPress: ()=>void }) {
+function UtilityIconButton({ label, icon: Icon, onPress }: UtilityIconButtonProps) {
   return (
     <Pressable onPress={onPress} style={styles.utilityBtn}>
       <Icon size={16} color={COLORS.actionButtonText} />
@@ -1213,17 +1333,19 @@ function UtilityIconButton({ label, icon: Icon, onPress }: { label: string; icon
   );
 }
 
-type AddressRowProps = { label: string; value?: string | null; color: string; onPress: () => void; textColor?: string; dividerColor?: string };
-
-function AddressRow({ label, value, color, onPress, textColor, dividerColor }: AddressRowProps) {
-  if (!value) return null;
+function AddressRow(props: AddressRowProps) {
+  const { label, value, color, onPress, textColor, dividerColor, force = false, placeholder, showLabel = true } = props;
+  const content = value?.trim() || (force ? (placeholder ?? 'Adresse indisponible') : '');
+  if (!content) return null;
   return (
     <Pressable style={[styles.addressRow, dividerColor && { borderBottomColor: dividerColor }]} onPress={onPress}>
-      <View style={styles.addressHeader}>
-        <MapPin size={14} color={color} />
-        <Text style={[styles.addressLabel, { color }]}>{label}</Text>
+      <View style={styles.addressContent}>
+        <MapPin size={16} color={color} style={styles.addressIcon} />
+        <View style={{ flex: 1 }}>
+          {showLabel && <Text style={[styles.addressLabel, { color }]}>{label}</Text>}
+          <Text style={[styles.addressText, textColor && { color: textColor }]}>{content}</Text>
+        </View>
       </View>
-      <Text style={[styles.addressText, textColor && { color: textColor }]}>{value}</Text>
     </Pressable>
   );
 }
@@ -1498,6 +1620,19 @@ const styles = StyleSheet.create({
   },
   inputLikeText: { color: COLORS.text, fontWeight: '700', marginTop: 2 },
   timeField: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6 },
+  durationSection: { marginTop: 8 },
+  durationRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  durationBox: {
+    flexGrow: 1,
+    minWidth: '30%',
+    backgroundColor: COLORS.inputBg,
+    borderColor: COLORS.inputBorder,
+    borderWidth: 1,
+    borderRadius: RADII.input,
+    padding: 12,
+  },
+  durationLabel: { color: COLORS.textMuted, fontWeight: '700', marginBottom: 4 },
+  durationValue: { color: COLORS.text, fontWeight: '800', fontSize: 16 },
   addressInputContainer: { marginBottom: 12 },
   inputWrapper: { flexDirection: 'row', alignItems: 'center' },
   inputField: { flex: 1 },
@@ -1520,7 +1655,6 @@ const styles = StyleSheet.create({
   toggleText: { fontWeight: '800' },
   toggleTextSelected: { color: COLORS.darkText },
   toggleTextGhost: { color: COLORS.text },
-
 
   card: {
     backgroundColor: COLORS.inputBg,
@@ -1560,7 +1694,6 @@ const styles = StyleSheet.create({
   cardLine: { color: COLORS.text, marginTop: 2 },
   cardLabel: { color: COLORS.textMuted, fontWeight: '700' },
 
-
   quickAction: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: RADII.button },
   quickActionText: { fontWeight: '800' },
   quickAction_info: { backgroundColor: COLORS.azure },
@@ -1569,9 +1702,16 @@ const styles = StyleSheet.create({
   quickAction_ghost: { backgroundColor: 'transparent', borderWidth: 1, borderColor: COLORS.outline },
 
   addressRow: { marginTop: 4, paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(255,255,255,0.15)' },
-  addressHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
+  addressContent: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  addressIcon: { alignSelf: 'flex-start' },
   addressLabel: { fontWeight: '800', textTransform: 'uppercase', fontSize: 12 },
   addressText: { color: COLORS.text, fontWeight: '700' },
+  tripMetaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingTop: 8, marginTop: 4, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(255,255,255,0.15)' },
+  tripMetaChip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 6, borderRadius: RADII.button, borderWidth: 1 },
+  tripMetaText: { fontWeight: '700' },
+  durationChain: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 8, marginTop: 4, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(255,255,255,0.15)' },
+  durationChipCard: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: RADII.button, backgroundColor: 'rgba(255,255,255,0.08)' },
+  durationChipText: { fontWeight: '800' },
 
   commentBox: { marginTop: 10, backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: RADII.card, padding: 12, borderWidth: 1, borderColor: COLORS.inputBorder },
   commentLabel: { color: COLORS.textMuted, fontWeight: '800', marginBottom: 4 },
@@ -1598,10 +1738,6 @@ const styles = StyleSheet.create({
   actionsRow: { flexDirection: 'row', gap: 8, marginTop: 12, flexWrap: 'wrap' },
   ghostBtnSm: { borderColor: COLORS.outline, borderWidth: 1, borderRadius: RADII.button, paddingHorizontal: 12, paddingVertical: 8 },
   ghostBtnSmText: { color: COLORS.text },
-
-  fabColumn: { position: 'absolute', right: 16, alignItems: 'flex-end', gap: 8 },
-  fab: { width: 56, height: 56, borderRadius: 28, backgroundColor: COLORS.azure, alignItems: 'center', justifyContent: 'center' },
-  fabText: { color: COLORS.darkText, fontWeight: '900', fontSize: 28, lineHeight: 28 },
   modalWrap: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalCard: { backgroundColor: COLORS.background, borderTopLeftRadius: RADII.card, borderTopRightRadius: RADII.card, borderColor: COLORS.inputBorder, borderWidth: 1, padding: 16, maxHeight: '90%' },
   modalTitle: { color: COLORS.text, fontSize: 18, fontWeight: '800', marginBottom: 12 },

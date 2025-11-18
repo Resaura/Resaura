@@ -20,6 +20,7 @@ import { ChevronLeft, ChevronRight, Plus, Calculator, Edit2, Target, X } from 'l
 import Svg, { Circle } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useSwipeTabsNavigation } from '@/hooks/useSwipeTabsNavigation';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -289,6 +290,7 @@ export default function FinanceScreen() {
   const safeTop = Math.max(32, insets.top + 12);
   const safeBottom = (insets.bottom || 0) + 8;
   const scrollPaddingBottom = safeBottom + 80;
+  const swipeHandlers = useSwipeTabsNavigation('finance');
   const txPrefillParam = params?.txPrefill as string | string[] | undefined;
   const [side, setSide] = useState<Side>('revenu');
   const [period, setPeriod] = useState<Period>('week');
@@ -729,6 +731,7 @@ export default function FinanceScreen() {
   /* UI */
   return (
     <View
+      {...swipeHandlers}
       style={[
         styles.container,
         { paddingTop: safeTop, paddingBottom: safeBottom },

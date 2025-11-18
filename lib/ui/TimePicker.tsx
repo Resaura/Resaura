@@ -16,9 +16,10 @@ type Props = {
   value: string; // HH:MM
   onClose: () => void;
   onConfirm: (value: string) => void;
+  label?: string;
 };
 
-export default function TimePicker({ visible, value, onClose, onConfirm }: Props) {
+export default function TimePicker({ visible, value, onClose, onConfirm, label = 'Heure' }: Props) {
   const [initialH, initialM] = value.split(':').map((part) => Number.parseInt(part, 10) || 0);
   const hours = useMemo(() => Array.from({ length: 24 }, (_, index) => index), []);
   const minutes = useMemo(() => Array.from({ length: 12 }, (_, index) => index * 5), []);
@@ -52,7 +53,7 @@ export default function TimePicker({ visible, value, onClose, onConfirm }: Props
     >
       <View style={styles.overlay}>
         <View style={styles.box}>
-          <Text style={styles.title}>Heure</Text>
+          <Text style={styles.title}>{label}</Text>
           <View style={styles.rows}>
             <FlatList
               data={hours}
@@ -116,4 +117,3 @@ const styles = StyleSheet.create({
   ghost: { borderColor: COLORS.outline, borderWidth: 1, borderRadius: RADII.button, paddingHorizontal: 16, paddingVertical: 10 },
   ghostText: { color: COLORS.text, fontWeight: '700' },
 });
-

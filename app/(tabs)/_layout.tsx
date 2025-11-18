@@ -3,7 +3,7 @@ import React from 'react';
 import { Platform, StatusBar } from 'react-native';
 import { Tabs } from 'expo-router';
 import {
-  Calendar, Users, MapPin, DollarSign, Wrench, Settings, Sparkles,
+  Calendar, Users, CalendarRange, DollarSign, Wrench, Settings, Sparkles,
 } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -35,6 +35,10 @@ function TabsContent() {
           tabBarStyle: {
             backgroundColor: COLORS.background,
             borderTopWidth: 0,
+            borderTopColor: 'transparent',
+            elevation: 0,
+            shadowOpacity: 0,
+            shadowColor: 'transparent',
             height: 56 + tabBarPadding,
             paddingBottom: tabBarPadding,
             paddingTop: 8,
@@ -61,11 +65,17 @@ function TabsContent() {
           }}
         />
         <Tabs.Screen
-          name="map"
+          name="clients/[id]"
           options={{
-            title: 'Carte',
+            href: null,
+          }}
+        />
+        <Tabs.Screen
+          name="planning"
+          options={{
+            title: 'Planning',
             tabBarIcon: ({ size, color }) => (
-              <MapPin size={size} color={color} strokeWidth={2} />
+              <CalendarRange size={size} color={color} strokeWidth={2} />
             ),
           }}
         />
@@ -109,4 +119,3 @@ function TabsContent() {
     </>
   );
 }
-

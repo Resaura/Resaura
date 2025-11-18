@@ -279,7 +279,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingTop: 28,
+    paddingBottom: 16,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: COLORS.inputBorder,
   },
@@ -356,4 +357,3 @@ const styles = StyleSheet.create({
   },
   duplicateText: { color: COLORS.text, fontWeight: '600' },
 });
-

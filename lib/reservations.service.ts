@@ -15,10 +15,14 @@ export type Reservation = {
   child_seat?: boolean | null;
   flight_no?: string | null;
   train_no?: string | null;
+  transport_kind?: 'none' | 'flight' | 'train' | null;
   note_driver?: string | null;
   note_client?: string | null;
   distance_km?: number | null;
   duration_min?: number | null;
+  approach_duration_min?: number | null;
+  ride_duration_min?: number | null;
+  return_duration_min?: number | null;
   price_est?: number | null;
   payment_mode?: 'cash'|'card'|'transfer'|'other'|null;
   status: 'a_venir'|'en_cours'|'terminee'|'annulee'|'no_show';

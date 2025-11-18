@@ -16,6 +16,7 @@ import { supabase } from '@/lib/supabase';
 import { Settings as SettingsType, Vehicle } from '@/types/database';
 import { User, Car, LogOut, Save, Briefcase, Maximize2 } from 'lucide-react-native';
 import { useDisplaySettings } from '@/contexts/DisplayContext';
+import { useSwipeTabsNavigation } from '@/hooks/useSwipeTabsNavigation';
 
 const C = {
   bg: '#001f3b',
@@ -36,6 +37,7 @@ export default function SettingsScreen() {
 
   const safeBottom = (insets.bottom || 0) + 8;
   const safeTop = Math.max(60, insets.top + 20);
+  const swipeHandlers = useSwipeTabsNavigation('settings');
 
   const [settings, setSettings] = useState<SettingsType | null>(null);
   const [vehicle, setVehicle] = useState<Vehicle | null>(null);
@@ -179,7 +181,7 @@ export default function SettingsScreen() {
   };
 
   return (
-    <View style={[styles.container, { paddingBottom: safeBottom }]}>
+    <View {...swipeHandlers} style={[styles.container, { paddingBottom: safeBottom }]}>
       <View style={[styles.header, { paddingTop: safeTop }]}>
         <Text style={styles.title}>Paramètres</Text>
       </View>

@@ -24,6 +24,7 @@ import {
   DEFAULT_GOOGLE_REVIEW_MESSAGE,
 } from '@/lib/preferences';
 import { getSmsShortcuts, saveSmsShortcuts, type SmsShortcut } from '@/lib/smsShortcuts';
+import { useSwipeTabsNavigation } from '@/hooks/useSwipeTabsNavigation';
 
 interface Note {
   id: string;
@@ -57,6 +58,7 @@ export default function ToolsScreen() {
   const insets = useSafeAreaInsets();
   const safeBottom = (insets.bottom || 0) + 12;
   const safeTop = Math.max(20, insets.top);
+  const swipeHandlers = useSwipeTabsNavigation('tools');
 
   useEffect(() => {
     if (user) {
@@ -213,7 +215,7 @@ export default function ToolsScreen() {
   };
 
   return (
-    <View style={[styles.container, { paddingBottom: safeBottom }]}>
+    <View {...swipeHandlers} style={[styles.container, { paddingBottom: safeBottom }]}>
       {/* Header */}
       <View style={[styles.header, { paddingTop: safeTop + 8 }]}>
         <Text style={styles.title}>Outils Chauffeur</Text>
