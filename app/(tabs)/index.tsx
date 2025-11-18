@@ -1,11 +1,12 @@
-// app/(tabs)/bookings.tsx
+﻿// app/(tabs)/bookings.tsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, FlatList, Pressable, TextInput, Modal, Platform, Share, LayoutAnimation, UIManager, KeyboardAvoidingView, ScrollView, Linking, ActivityIndicator, PermissionsAndroid } from 'react-native';
 import type { TextInputProps } from 'react-native';
-import { Phone, Share2, Edit3, MapPin, Filter, RotateCcw, Star, LocateFixed, Clock3, Plane, TrainFront, Baby, Users, Luggage, ChevronRight } from 'lucide-react-native';
+import { Phone, Share2, Edit3, MapPin, RotateCcw, Star, LocateFixed, Clock3, Plane, TrainFront, Baby, Users, Luggage, ChevronRight } from 'lucide-react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS, RADII, SHADOW } from '@/lib/theme';
+import { formatDurationLong } from '@/lib/time';
 import { listReservations, createReservation, updateReservation, removeReservation, transitionReservation, type Reservation, type ReservationCreate, type ReservationUpdate, ListParams } from '@/lib/reservations.service';
 import { quickCreateClient } from '@/lib/clients.service';
 import { searchClients, type ClientSummary } from '@/lib/clients.search';
@@ -15,6 +16,7 @@ import CalendarSingle from '@/lib/ui/CalendarSingle';
 import TimePicker from '@/lib/ui/TimePicker';
 import { useSwipeTabsNavigation } from '@/hooks/useSwipeTabsNavigation';
 import FloatingActionButton from '@/components/ui/FloatingActionButton';
+import FilterButton from '@/components/ui/FilterButton';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -60,17 +62,7 @@ function hhmmToMinutes(value: string) {
   return Math.max(0, hours * 60 + mins);
 }
 
-function formatDurationDisplay(minutes?: number | null) {
-  if (typeof minutes !== 'number' || Number.isNaN(minutes)) return '--';
-  const value = Math.max(0, Math.round(minutes));
-  if (value >= 60) {
-    const hours = Math.floor(value / 60);
-    const mins = value % 60;
-    return `${hours}h${String(mins).padStart(2, '0')} minutes`;
-  }
-  const unit = value === 1 ? 'minute' : 'minutes';
-  return `${value} ${unit}`;
-}
+const formatDurationDisplay = formatDurationLong;
 
 type DateFilter = 'all' | 'today' | 'week' | 'custom';
 type DurationTarget = 'approach' | 'ride' | 'return';
@@ -596,7 +588,7 @@ export default function BookingsScreen() {
     }
   };
 
-  const saveForm = async () => {
+      const saveForm = async () => {
     if (isSaving) return;
     const clientFirst = form.client_first.trim();
     const clientLast = form.client_last.trim();
@@ -605,8 +597,17 @@ export default function BookingsScreen() {
     const dropSegments = [form.dropoff, ...(form.dropoffStops ?? [])]
       .map((segment) => segment.trim())
       .filter(Boolean);
-    if (!clientLast || !clientFirst || !phone || !pickup || dropSegments.length === 0) {
-      alert.show('Champs manquants', 'Complétez les informations obligatoires.');
+    const missingFields: string[] = [];
+    if (!clientLast) missingFields.push('le nom');
+    if (!clientFirst) missingFields.push('le prénom');
+    if (!phone) missingFields.push('le téléphone');
+    if (!pickup) missingFields.push("l'adresse de départ");
+    if (dropSegments.length === 0) missingFields.push("l'adresse d'arrivée");
+    if (missingFields.length > 0) {
+      const last = missingFields[missingFields.length - 1];
+      const others = missingFields.slice(0, -1).join(', ');
+      const summary = missingFields.length === 1 ? last : `${others} et ${last}`;
+      alert.show('Champs manquants', `Complétez ${summary}.`);
       return;
     }
     const [hoursRaw, minsRaw] = formTimeHHMM.split(':');
@@ -668,13 +669,12 @@ export default function BookingsScreen() {
       setClientLookup([]);
       setSelectedClientId(null);
       await refresh();
+      (globalThis as any).__RESAURA_PLANNING_DIRTY = true;
       alert.show(
         editing ? 'Réservation mise à jour' : 'Réservation créée',
-        editing ? 'Les modifications ont été enregistrées.' : 'La réservation a été ajoutée à la liste.',
-      );
-      alert.show(
-        editing ? 'Reservation mise à jour' : 'Reservation créée',
-        editing ? 'Les modifications ont été enregistrées.' : 'La réservation a été ajoutée à votre planning.',
+        editing
+          ? 'Les modifications ont été enregistrées.'
+          : 'La réservation a été ajoutée à la liste.',
       );
     } catch (error) {
       console.warn('[Bookings] saveForm error', error);
@@ -990,14 +990,7 @@ return (
             />
           ))}
         </View>
-        <Pressable
-          onPress={openFiltersPanel}
-          style={styles.filterButton}
-          accessibilityRole="button"
-          accessibilityLabel="Ouvrir les filtres"
-        >
-          <Filter size={20} color={COLORS.background} />
-        </Pressable>
+        <FilterButton onPress={openFiltersPanel} accessibilityLabel="Ouvrir les filtres" />
       </View>
 
       <Modal visible={filtersOpen} transparent animationType="fade" onRequestClose={closeFiltersPanel}>
@@ -1235,7 +1228,7 @@ return (
               </Pressable>
               <Pressable
                 style={[styles.modalActionBtn, styles.modalActionPrimary, isSaving && { opacity: 0.7 }]}
-                onPress={saveForm}
+                onPress={() => { void saveForm(); }}
                 disabled={isSaving}
               >
                 {isSaving ? (
@@ -1595,7 +1588,6 @@ const styles = StyleSheet.create({
   searchRow: { flexDirection: 'row', padding: 16, paddingBottom: 8, gap: 8 },
   statusFilterRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 8, gap: 12 },
   statusChipsWrap: { flexGrow: 1, flexShrink: 1, flexDirection: 'row', flexWrap: 'nowrap', gap: 8, overflow: 'hidden' },
-  filterButton: { width: 44, height: 44, borderRadius: RADII.button, backgroundColor: COLORS.azure, alignItems: 'center', justifyContent: 'center' },
   inputContainer: { marginBottom: 12 },
   inputHalf: { flex: 1 },
   inputRow: { flexDirection: 'row', alignItems: 'center' },
@@ -1928,3 +1920,5 @@ function translateGeolocationError(error: { code?: number; message?: string }) {
       return error?.message || 'Impossible de récupérer la localisation.';
   }
 }
+
+

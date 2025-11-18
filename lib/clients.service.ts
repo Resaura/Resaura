@@ -18,7 +18,7 @@ export type ClientListFilters = {
   blacklist: boolean;
 };
 
-export type ClientSortOption = 'lastRide' | 'totalCourses' | 'alpha';
+export type ClientSortOption = 'lastRide' | 'totalCourses' | 'alphaAsc' | 'alphaDesc';
 
 export type FavoriteAddresses = {
   home: string | null;
@@ -238,7 +238,14 @@ export function sortClientItems(items: ClientListItem[], sort: ClientSortOption)
     case 'totalCourses':
       copy.sort((a, b) => b.total_courses - a.total_courses);
       break;
-    case 'alpha':
+    case 'alphaDesc':
+      copy.sort((a, b) => {
+        const aName = `${a.last_name} ${a.first_name}`.trim().toLowerCase();
+        const bName = `${b.last_name} ${b.first_name}`.trim().toLowerCase();
+        return bName.localeCompare(aName);
+      });
+      break;
+    case 'alphaAsc':
       copy.sort((a, b) => {
         const aName = `${a.last_name} ${a.first_name}`.trim().toLowerCase();
         const bName = `${b.last_name} ${b.first_name}`.trim().toLowerCase();

@@ -13,7 +13,8 @@
     "web": "npx expo start --web",
     "typecheck": "npx tsc --noEmit",
     "embed:android": "npx expo export:embed --platform android --bundle-output dist/android/index.bundle --assets-output dist/android/assets",
-    "fix:eas": "node scripts/fix-eas-json.mjs"
+    "fix:eas": "node scripts/fix-eas-json.mjs",
+    "check:utf8": "node scripts/check-utf8.mjs"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^2.2.0",

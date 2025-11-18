@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect, useRef } from 'react';
+﻿import React, { useMemo, useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -16,11 +16,13 @@ import {
   Keyboard,
   PanResponder,
 } from 'react-native';
-import { ChevronLeft, ChevronRight, Plus, Calculator, Edit2, Target, X } from 'lucide-react-native';
+import { ChevronLeft, ChevronRight, Calculator, Edit2, Target, X } from 'lucide-react-native';
 import Svg, { Circle } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSwipeTabsNavigation } from '@/hooks/useSwipeTabsNavigation';
+import { COLORS, RADII, SHADOW } from '@/lib/theme';
+import FloatingActionButton from '@/components/ui/FloatingActionButton';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -28,16 +30,17 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 
 /* ---------------- THEME (Resaura) ---------------- */
 const C = {
-  bg: '#0B1E3F',
-  card: '#082038',
-  card2: '#061827',
-  text: '#E6FBFF',
-  textMut: '#9FBFD9',
-  accent1: '#2BB5FF', // Azur
-  accent2: '#5CE1E6', // Turquoise (sélection partout maintenant)
-  ok: '#10B981',
-  danger: '#FF6B6B',
-  darkInk: '#081925',
+  bg: COLORS.background,
+  card: COLORS.inputBg,
+  card2: COLORS.backgroundDeep,
+  text: COLORS.text,
+  textMut: COLORS.textMuted,
+  accent1: COLORS.azure,
+  accent2: COLORS.azure,
+  ok: COLORS.success,
+  danger: COLORS.danger,
+  darkInk: COLORS.darkText,
+  border: COLORS.inputBorder,
 };
 
 /* ---------------- TYPES ---------------- */
@@ -168,7 +171,7 @@ const CalendarRange = ({
                 key={j}
                 style={[
                   calStyles.dayCell,
-                  between && { backgroundColor: '#0F3A57' },
+                  between && { backgroundColor: COLORS.backgroundDeep },
                   selected && { backgroundColor: selectedColor },
                 ]}
                 onPress={() => select(d)}
@@ -252,7 +255,13 @@ const CalendarSingle = ({
 };
 
 const calStyles = StyleSheet.create({
-  wrap: { backgroundColor: C.card, borderRadius: 12, padding: 10 },
+  wrap: {
+    backgroundColor: C.card,
+    borderRadius: RADII.card,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: C.border,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -951,9 +960,7 @@ export default function FinanceScreen() {
         )}
       </ScrollView>
 
-      {/* Floating + (toujours azur pour CTA global) */}
-      <TouchableOpacity
-        style={styles.fab}
+      <FloatingActionButton
         onPress={() => {
           setFormSide(side);
           setAmountMode('TTC');
@@ -966,9 +973,8 @@ export default function FinanceScreen() {
           setNote('');
           setAddModal(true);
         }}
-      >
-        <Plus size={22} color={C.darkInk} />
-      </TouchableOpacity>
+        accessibilityLabel="Ajouter une transaction"
+      />
 
       {/* --------- MODAL RANGE (sélection turquoise) --------- */}
       <Modal visible={period === 'range' && rangeModal} transparent animationType="fade">
@@ -1762,10 +1768,10 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   sideTab: {
-    backgroundColor: '#083054',
+    backgroundColor: C.card2,
     paddingVertical: 8,
     paddingHorizontal: 14,
-    borderRadius: 10,
+    borderRadius: RADII.button,
   },
   sideTabText: { color: C.text, fontWeight: '700' },
 
@@ -1777,10 +1783,10 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   periodBtn: {
-    backgroundColor: '#083054',
+    backgroundColor: C.card2,
     paddingVertical: 6,
     paddingHorizontal: 10,
-    borderRadius: 10,
+    borderRadius: RADII.button,
     marginBottom: 8,
   },
   periodBtnText: { color: C.text, fontWeight: '700', fontSize: 12 },
@@ -1793,10 +1799,18 @@ const styles = StyleSheet.create({
     marginTop: 6,
     marginBottom: 4,
   },
-  arrowBtn: { backgroundColor: '#083054', padding: 8, borderRadius: 8 },
+  arrowBtn: { backgroundColor: C.card2, padding: 8, borderRadius: RADII.button },
   periodText: { color: C.text, fontWeight: '700' },
 
-  chartCard: { backgroundColor: C.card, margin: 12, borderRadius: 12, padding: 12 },
+  chartCard: {
+    backgroundColor: C.card,
+    margin: 12,
+    borderRadius: RADII.card,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: C.border,
+    ...SHADOW.card,
+  },
   chartHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1810,7 +1824,7 @@ const styles = StyleSheet.create({
   goalLabel: { color: C.text, fontWeight: '700' },
   goalBar: {
     height: 12,
-    borderRadius: 8,
+    borderRadius: RADII.button,
     backgroundColor: C.card2,
     marginTop: 8,
     overflow: 'hidden',
@@ -1825,10 +1839,10 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   htttcBtn: {
-    backgroundColor: '#083054',
+    backgroundColor: C.card2,
     paddingVertical: 6,
     paddingHorizontal: 14,
-    borderRadius: 999,
+    borderRadius: RADII.button,
   },
   htttcText: { color: C.text, fontWeight: '700' },
 
@@ -1842,8 +1856,11 @@ const styles = StyleSheet.create({
     backgroundColor: C.card,
     marginHorizontal: 12,
     marginTop: 10,
-    borderRadius: 10,
+    borderRadius: RADII.card,
+    borderWidth: 1,
+    borderColor: C.border,
     padding: 12,
+    ...SHADOW.card,
   },
   catIcon: {
     width: 34,
@@ -1858,19 +1875,6 @@ const styles = StyleSheet.create({
   catPct: { color: C.textMut, fontSize: 12 },
   catAmount: { color: C.text, fontWeight: '800' },
 
-  fab: {
-    position: 'absolute',
-    right: 20,
-    bottom: 30,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: C.accent1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 5,
-  },
-
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.6)',
@@ -1881,19 +1885,21 @@ const styles = StyleSheet.create({
   modalBox: {
     width: '100%',
     backgroundColor: C.card,
-    borderRadius: 12,
+    borderRadius: RADII.card,
     padding: 16,
     maxWidth: 520,
+    borderWidth: 1,
+    borderColor: C.border,
   },
 
   modalTitle: { color: C.text, fontWeight: '800', fontSize: 18, marginBottom: 8 },
 
   row: { flexDirection: 'row', gap: 8, marginBottom: 8, flexWrap: 'wrap' },
   pill: {
-    backgroundColor: '#083054',
+    backgroundColor: C.card2,
     paddingVertical: 8,
     paddingHorizontal: 12,
-    borderRadius: 10,
+    borderRadius: RADII.button,
   },
   pillText: { color: C.text, fontWeight: '700' },
 
@@ -1901,16 +1907,16 @@ const styles = StyleSheet.create({
   input: {
     backgroundColor: C.card2,
     color: C.text,
-    borderRadius: 8,
+    borderRadius: RADII.input,
     padding: 10,
     marginTop: 8,
   },
 
   pillMini: {
-    backgroundColor: '#083054',
+    backgroundColor: C.card2,
     paddingVertical: 6,
     paddingHorizontal: 10,
-    borderRadius: 8,
+    borderRadius: RADII.button,
     marginTop: 8,
   },
   pillMiniText: { color: C.text, fontWeight: '800' },
@@ -1924,10 +1930,10 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   tvaBtn: {
-    backgroundColor: '#083054',
+    backgroundColor: C.card2,
     paddingVertical: 6,
     paddingHorizontal: 10,
-    borderRadius: 8,
+    borderRadius: RADII.button,
   },
   tvaText: { color: C.text, fontWeight: '800' },
 
@@ -1965,10 +1971,10 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   quickBtn: {
-    backgroundColor: '#083054',
+    backgroundColor: C.card2,
     paddingVertical: 8,
     paddingHorizontal: 12,
-    borderRadius: 10,
+    borderRadius: RADII.button,
   },
   quickText: { color: C.text, fontWeight: '700' },
 
@@ -2013,9 +2019,11 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     backgroundColor: C.card2,
-    borderRadius: 10,
+    borderRadius: RADII.card,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: C.border,
   },
 
   modalButtonsRow: {
@@ -2028,18 +2036,19 @@ const styles = StyleSheet.create({
   saveBtn: {
     paddingVertical: 10,
     paddingHorizontal: 12,
-    borderRadius: 8,
+    borderRadius: RADII.button,
+    backgroundColor: C.accent1,
     alignItems: 'center',
   },
-  saveBtnText: { color: C.text, fontWeight: '900' },
+  saveBtnText: { color: C.darkInk, fontWeight: '900' },
   cancelBtn: {
     backgroundColor: 'transparent',
     paddingVertical: 10,
     paddingHorizontal: 12,
-    borderRadius: 8,
+    borderRadius: RADII.button,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#0F3A57',
+    borderColor: C.border,
   },
   cancelBtnText: { color: C.textMut },
 
@@ -2061,7 +2070,7 @@ const styles = StyleSheet.create({
   iconPick: {
     backgroundColor: C.card2,
     padding: 8,
-    borderRadius: 8,
+    borderRadius: RADII.button,
     marginRight: 6,
   },
   catManageRow: {
@@ -2069,7 +2078,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
     paddingVertical: 8,
-    borderBottomColor: '#0F3A57',
+    borderBottomColor: C.border,
     borderBottomWidth: 1,
     marginTop: 4,
   },
@@ -2085,10 +2094,11 @@ const styles = StyleSheet.create({
     backgroundColor: C.card2,
     paddingVertical: 10,
     paddingHorizontal: 12,
-    borderRadius: 8,
+    borderRadius: RADII.button,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 8,
   },
   calcTxt: { color: C.text, fontWeight: '800' },
 });
+

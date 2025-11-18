@@ -1,15 +1,19 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Linking,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
+  type GestureResponderEvent,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Calendar, ChevronLeft, ChevronRight, Clock3, MapPin } from 'lucide-react-native';
+import { useFocusEffect } from 'expo-router';
+import { Calendar, ChevronLeft, ChevronRight, MapPin, Phone } from 'lucide-react-native';
 
 import { useAppAlert } from '@/contexts/AlertContext';
 import { listReservations, type Reservation } from '@/lib/reservations.service';
@@ -20,6 +24,7 @@ import FloatingActionButton from '@/components/ui/FloatingActionButton';
 
 const HOUR_BLOCK_HEIGHT = 60;
 const HOURS = Array.from({ length: 24 }, (_, idx) => idx);
+const STOP_SPLIT_REGEX = /\u2192|->|\n/g;
 
 type ViewMode = 'day' | 'week';
 
@@ -36,6 +41,8 @@ export default function PlanningScreen() {
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [calendarPickerOpen, setCalendarPickerOpen] = useState(false);
   const [calendarSelection, setCalendarSelection] = useState<Date>(new Date());
+  const [reservationModalOpen, setReservationModalOpen] = useState(false);
+  const [selectedReservation, setSelectedReservation] = useState<Reservation | null>(null);
 
   const range = useMemo(() => {
     const fromDate = viewMode === 'day' ? startOfDay(cursor) : startOfWeek(cursor);
@@ -76,6 +83,54 @@ export default function PlanningScreen() {
   const activeDayKey = formatDateKey(cursor);
   const dayEvents = reservationsByDay[activeDayKey] ?? [];
 
+  const extractPrimaryDropoff = useCallback((raw?: string | null) => {
+    if (!raw) return '';
+    return raw.split(STOP_SPLIT_REGEX).map((segment) => segment.trim()).filter(Boolean)[0] ?? '';
+  }, []);
+
+  const dialReservationPhone = useCallback((phone?: string | null, event?: GestureResponderEvent) => {
+    event?.stopPropagation?.();
+    const sanitized = phone?.replace(/[^\d+]/g, '');
+    if (!sanitized) {
+      alert.show('Numéro indisponible', 'Aucun numéro valide pour ce client.');
+      return;
+    }
+    Linking.openURL(`tel:${sanitized}`).catch(() => {
+      alert.show('Appel impossible', 'Impossible de lancer l’appel.');
+    });
+  }, [alert]);
+
+  const openReservationAddress = useCallback((label: string, value?: string | null, event?: GestureResponderEvent) => {
+    event?.stopPropagation?.();
+    const target = value?.trim();
+    if (!target) {
+      alert.show(`${label} indisponible`, `Aucune adresse pour ${label.toLowerCase()}.`);
+      return;
+    }
+    const encoded = encodeURIComponent(target);
+    const fallback = `https://www.google.com/maps/search/?api=1&query=${encoded}`;
+    const nativeUrl = Platform.select({
+      ios: `http://maps.apple.com/?q=${encoded}`,
+      android: `geo:0,0?q=${encoded}`,
+      default: fallback,
+    }) ?? fallback;
+    Linking.openURL(nativeUrl).catch(() => {
+      Linking.openURL(fallback).catch(() => {
+        alert.show('Navigation impossible', `Impossible d'ouvrir ${label}.`);
+      });
+    });
+  }, [alert]);
+
+  const openReservationModal = useCallback((reservation: Reservation) => {
+    setSelectedReservation(reservation);
+    setReservationModalOpen(true);
+  }, []);
+
+  const closeReservationModal = useCallback(() => {
+    setReservationModalOpen(false);
+    setSelectedReservation(null);
+  }, []);
+
   const loadReservations = useCallback(async () => {
     setLoading(true);
     try {
@@ -98,6 +153,15 @@ export default function PlanningScreen() {
   React.useEffect(() => {
     loadReservations();
   }, [loadReservations]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if ((globalThis as any).__RESAURA_PLANNING_DIRTY) {
+        (globalThis as any).__RESAURA_PLANNING_DIRTY = false;
+        loadReservations();
+      }
+    }, [loadReservations]),
+  );
 
   const shiftCursor = (direction: -1 | 1) => {
     setCursor((prev) => {
@@ -206,11 +270,22 @@ export default function PlanningScreen() {
           <Text style={styles.loaderText}>Chargement du planning…</Text>
         </View>
       ) : viewMode === 'day' ? (
-        <DayTimeline date={cursor} events={dayEvents} />
+        <DayTimeline
+          date={cursor}
+          events={dayEvents}
+          onReservationPress={openReservationModal}
+          onCall={dialReservationPhone}
+          onAddress={openReservationAddress}
+          extractDropoff={extractPrimaryDropoff}
+        />
       ) : (
         <WeekBoard
           days={weekDays}
           reservationsByDay={reservationsByDay}
+          onReservationPress={openReservationModal}
+          onCall={dialReservationPhone}
+          onAddress={openReservationAddress}
+          extractDropoff={extractPrimaryDropoff}
         />
       )}
 
@@ -245,11 +320,37 @@ export default function PlanningScreen() {
           </View>
         </View>
       </Modal>
+
+      <ReservationDetailsModal
+        visible={reservationModalOpen}
+        reservation={selectedReservation}
+        onClose={closeReservationModal}
+        onCall={dialReservationPhone}
+        onAddress={openReservationAddress}
+        extractDropoff={extractPrimaryDropoff}
+      />
     </View>
   );
 }
 
-function DayTimeline({ date, events }: { date: Date; events: Reservation[] }) {
+type ReservationActionProps = {
+  onReservationPress: (reservation: Reservation) => void;
+  onCall: (phone?: string | null, event?: GestureResponderEvent) => void;
+  onAddress: (label: string, value?: string | null, event?: GestureResponderEvent) => void;
+  extractDropoff: (raw?: string | null) => string;
+};
+
+function DayTimeline({
+  date,
+  events,
+  onReservationPress,
+  onCall,
+  onAddress,
+  extractDropoff,
+}: {
+  date: Date;
+  events: Reservation[];
+} & ReservationActionProps) {
   const start = startOfDay(date).getTime();
   const dayDuration = 24 * 60;
   return (
@@ -281,33 +382,52 @@ function DayTimeline({ date, events }: { date: Date; events: Reservation[] }) {
               dayDuration,
               minutesFromStart + durationMin,
             );
+            const dropoffPrimary = extractDropoff(event.dropoff) || event.dropoff;
             return (
-              <View
+              <Pressable
                 key={event.id}
                 style={[
                   styles.timelineEvent,
                   { top, height: Math.min(height, HOURS.length * HOUR_BLOCK_HEIGHT - top) },
                 ]}
+                onPress={() => onReservationPress(event)}
               >
-                <Text style={styles.eventClient}>
-                  {event.client_last} {event.client_first}
-                </Text>
-                <Text style={styles.eventTime}>
-                  {formatHourMinutes(minutesFromStart)} - {formatHourMinutes(endMinutes)}
-                </Text>
-                <View style={styles.eventRow}>
-                  <Clock3 size={14} color={COLORS.textMuted} />
+                <View style={styles.eventHeaderRow}>
+                  <View>
+                    <Text style={styles.eventClient}>
+                      {event.client_last} {event.client_first}
+                    </Text>
+                    <Text style={styles.eventTime}>
+                      {formatHourMinutes(minutesFromStart)} - {formatHourMinutes(endMinutes)}
+                    </Text>
+                  </View>
+                  <Pressable
+                    style={styles.eventPhone}
+                    onPress={(pressEvent) => onCall(event.phone, pressEvent)}
+                  >
+                    <Phone size={14} color={COLORS.darkText} />
+                    <Text style={styles.eventPhoneText}>{event.phone ?? '—'}</Text>
+                  </Pressable>
+                </View>
+                <Pressable
+                  style={styles.eventRow}
+                  onPress={(pressEvent) => onAddress('Départ', event.pickup, pressEvent)}
+                >
+                  <MapPin size={14} color={COLORS.textOnLightMuted} />
                   <Text style={styles.eventMeta}>
                     {event.pickup || 'Départ non défini'}
                   </Text>
-                </View>
-                <View style={styles.eventRow}>
-                  <MapPin size={14} color={COLORS.textMuted} />
+                </Pressable>
+                <Pressable
+                  style={styles.eventRow}
+                  onPress={(pressEvent) => onAddress('Arrivée', dropoffPrimary, pressEvent)}
+                >
+                  <MapPin size={14} color={COLORS.textOnLightMuted} />
                   <Text style={styles.eventMeta}>
-                    {event.dropoff || 'Arrivée non définie'}
+                    {dropoffPrimary || 'Arrivée non définie'}
                   </Text>
-                </View>
-              </View>
+                </Pressable>
+              </Pressable>
             );
           })}
         </View>
@@ -319,10 +439,14 @@ function DayTimeline({ date, events }: { date: Date; events: Reservation[] }) {
 function WeekBoard({
   days,
   reservationsByDay,
+  onReservationPress,
+  onCall,
+  onAddress,
+  extractDropoff,
 }: {
   days: Date[];
   reservationsByDay: Record<string, Reservation[]>;
-}) {
+} & ReservationActionProps) {
   return (
     <ScrollView
       contentContainerStyle={styles.weekBoard}
@@ -340,27 +464,112 @@ function WeekBoard({
             {items.length === 0 ? (
               <Text style={styles.emptySlot}>Aucune réservation</Text>
             ) : (
-              items.map((event) => (
-                <View key={event.id} style={styles.weekEventCard}>
-                  <Text style={styles.eventClient}>
-                    {event.client_last} {event.client_first}
-                  </Text>
-                  <Text style={styles.eventTime}>
-                    {new Date(event.datetime).toLocaleTimeString([], {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
-                  </Text>
-                  <Text style={styles.eventMeta}>
-                    {event.pickup} → {event.dropoff}
-                  </Text>
-                </View>
-              ))
+              items.map((event) => {
+                const dt = new Date(event.datetime);
+                const dropoffPrimary = extractDropoff(event.dropoff) || event.dropoff;
+                return (
+                  <Pressable
+                    key={event.id}
+                    style={styles.weekEventCard}
+                    onPress={() => onReservationPress(event)}
+                  >
+                    <View style={styles.eventHeaderRow}>
+                      <View>
+                        <Text style={[styles.eventClient, styles.eventClientOnLight]}>
+                          {event.client_last} {event.client_first}
+                        </Text>
+                        <Text style={[styles.eventTime, styles.eventTimeOnLight]}>
+                          {dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </Text>
+                      </View>
+                      <Pressable
+                        style={styles.eventPhone}
+                        onPress={(pressEvent) => onCall(event.phone, pressEvent)}
+                      >
+                        <Phone size={14} color={COLORS.darkText} />
+                        <Text style={styles.eventPhoneText}>{event.phone ?? '—'}</Text>
+                      </Pressable>
+                    </View>
+                    <Pressable
+                      style={styles.eventRow}
+                      onPress={(pressEvent) => onAddress('Départ', event.pickup, pressEvent)}
+                    >
+                      <MapPin size={14} color={COLORS.textOnLightMuted} />
+                      <Text style={[styles.eventMeta, styles.eventMetaOnLight]}>
+                        {event.pickup || 'Départ non défini'}
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      style={styles.eventRow}
+                      onPress={(pressEvent) => onAddress('Arrivée', dropoffPrimary, pressEvent)}
+                    >
+                      <MapPin size={14} color={COLORS.textOnLightMuted} />
+                      <Text style={[styles.eventMeta, styles.eventMetaOnLight]}>
+                        {dropoffPrimary || 'Arrivée non définie'}
+                      </Text>
+                    </Pressable>
+                  </Pressable>
+                );
+              })
             )}
           </View>
         );
       })}
     </ScrollView>
+  );
+}
+
+function ReservationDetailsModal({
+  visible,
+  reservation,
+  onClose,
+  onCall,
+  onAddress,
+  extractDropoff,
+}: {
+  visible: boolean;
+  reservation: Reservation | null;
+  onClose: () => void;
+  onCall: (phone?: string | null, event?: GestureResponderEvent) => void;
+  onAddress: (label: string, value?: string | null, event?: GestureResponderEvent) => void;
+  extractDropoff: (raw?: string | null) => string;
+}) {
+  if (!reservation) return null;
+  const dt = new Date(reservation.datetime);
+  const dropoffPrimary = extractDropoff(reservation.dropoff) || reservation.dropoff;
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.modalOverlay}>
+        <View style={styles.reservationModalCard}>
+          <Text style={styles.modalTitle}>Réservation</Text>
+          <View style={styles.modalHeaderRow}>
+            <View>
+              <Text style={styles.modalClient}>{reservation.client_last} {reservation.client_first}</Text>
+              <Text style={styles.modalDate}>{dt.toLocaleDateString()} • {dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
+            </View>
+            <Pressable style={styles.eventPhone} onPress={() => onCall(reservation.phone)}>
+              <Phone size={16} color={COLORS.darkText} />
+              <Text style={styles.eventPhoneText}>{reservation.phone ?? '—'}</Text>
+            </Pressable>
+          </View>
+          <Pressable style={styles.modalRow} onPress={() => onAddress('Départ', reservation.pickup)}>
+            <MapPin size={16} color={COLORS.textOnLightMuted} />
+            <Text style={[styles.eventMeta, styles.eventMetaOnLight]}>
+              {reservation.pickup || 'Départ non défini'}
+            </Text>
+          </Pressable>
+          <Pressable style={styles.modalRow} onPress={() => onAddress('Arrivée', dropoffPrimary)}>
+            <MapPin size={16} color={COLORS.textOnLightMuted} />
+            <Text style={[styles.eventMeta, styles.eventMetaOnLight]}>
+              {dropoffPrimary || 'Arrivée non définie'}
+            </Text>
+          </Pressable>
+          <Pressable style={styles.ctaBtn} onPress={onClose}>
+            <Text style={styles.ctaBtnText}>Fermer</Text>
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -456,17 +665,17 @@ const styles = StyleSheet.create({
   segmentButtonSelected: { backgroundColor: COLORS.azure },
   segmentText: { color: COLORS.text, fontWeight: '700' },
   segmentTextSelected: { color: COLORS.darkText },
-  weekSelector: { gap: 12, paddingBottom: 2, paddingVertical: 2, marginBottom: 4 },
+  weekSelector: { gap: 12, paddingBottom: 0, paddingVertical: 2, marginBottom: 2 },
   dayChip: {
     borderRadius: RADII.card,
     borderWidth: 1,
-    borderColor: COLORS.inputBorder,
-    width: 72,
-    height: 72,
+    borderColor: COLORS.azure,
+    width: 64,
+    height: 64,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    backgroundColor: COLORS.inputBg,
+    backgroundColor: COLORS.backgroundDeep,
   },
   dayChipSelected: { backgroundColor: COLORS.azure, borderColor: COLORS.azure },
   dayChipText: { color: COLORS.textMuted, fontWeight: '700', textTransform: 'capitalize', textAlign: 'center' },
@@ -475,7 +684,14 @@ const styles = StyleSheet.create({
   loader: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8 },
   loaderText: { color: COLORS.textMuted, fontWeight: '600' },
   timelineScroll: { flex: 1 },
-  timeline: { flex: 1, position: 'relative', paddingBottom: 12 },
+  timeline: {
+    flex: 1,
+    position: 'relative',
+    paddingBottom: 12,
+    backgroundColor: COLORS.backgroundDeep,
+    borderRadius: RADII.card,
+    paddingHorizontal: 12,
+  },
   timelineRow: { flexDirection: 'row', alignItems: 'center', height: HOUR_BLOCK_HEIGHT },
   timelineHour: { width: 48, color: COLORS.textMuted, fontWeight: '600' },
   timelineDivider: { flex: 1, height: 1, backgroundColor: COLORS.inputBorder },
@@ -486,18 +702,32 @@ const styles = StyleSheet.create({
     right: 12,
     borderRadius: RADII.card,
     padding: 12,
-    backgroundColor: COLORS.background,
+    backgroundColor: COLORS.text,
     borderWidth: 1,
     borderColor: COLORS.azure,
     ...SHADOW.card,
   },
-  eventClient: { color: COLORS.text, fontWeight: '800', marginBottom: 4 },
-  eventTime: { color: COLORS.textMuted, fontWeight: '600', marginBottom: 4 },
-  eventRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },
-  eventMeta: { color: COLORS.text, flexShrink: 1, fontWeight: '600' },
+  eventHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, gap: 8 },
+  eventClient: { color: COLORS.textOnLight, fontWeight: '800', marginBottom: 4 },
+  eventClientOnLight: { color: COLORS.textOnLight },
+  eventTime: { color: COLORS.textOnLightMuted, fontWeight: '600', marginBottom: 4 },
+  eventTimeOnLight: { color: COLORS.textOnLightMuted },
+  eventRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
+  eventMeta: { color: COLORS.textOnLight, flexShrink: 1, fontWeight: '600' },
+  eventMetaOnLight: { color: COLORS.textOnLight },
+  eventPhone: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: COLORS.azure,
+    borderRadius: RADII.button,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  eventPhoneText: { color: COLORS.darkText, fontWeight: '700' },
   weekBoard: { gap: 12, paddingBottom: 120 },
   dayColumn: {
-    backgroundColor: COLORS.background,
+    backgroundColor: COLORS.backgroundDeep,
     borderRadius: RADII.card,
     padding: 12,
     borderWidth: 1,
@@ -509,12 +739,13 @@ const styles = StyleSheet.create({
   dayColumnDate: { color: COLORS.text, fontWeight: '800' },
   emptySlot: { color: COLORS.textMuted, fontStyle: 'italic' },
   weekEventCard: {
-    backgroundColor: 'transparent',
+    backgroundColor: COLORS.text,
     borderRadius: RADII.card,
     padding: 10,
     borderWidth: 1,
     borderColor: COLORS.azure,
     marginBottom: 8,
+    ...SHADOW.card,
   },
   modalOverlay: {
     flex: 1,
@@ -530,7 +761,19 @@ const styles = StyleSheet.create({
     padding: 20,
     gap: 16,
   },
+  reservationModalCard: {
+    backgroundColor: COLORS.background,
+    borderRadius: RADII.card,
+    borderWidth: 1,
+    borderColor: COLORS.inputBorder,
+    padding: 20,
+    gap: 12,
+  },
   modalTitle: { color: COLORS.text, fontSize: 18, fontWeight: '800', textAlign: 'center' },
+  modalHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 12, alignItems: 'center' },
+  modalClient: { color: COLORS.text, fontWeight: '800', fontSize: 18 },
+  modalDate: { color: COLORS.textMuted, fontWeight: '600', marginTop: 4 },
+  modalRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4 },
   modalButtonsRow: {
     flexDirection: 'row',
     justifyContent: 'flex-end',

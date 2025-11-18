@@ -10,10 +10,10 @@ import {
   FlatList,
   LayoutAnimation,
   Linking,
+  Modal,
   Platform,
   Pressable,
   RefreshControl,
-  ScrollView,
   StyleSheet,
   Switch,
   Text,
@@ -28,10 +28,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ChevronDown,
   ChevronUp,
-  Filter,
   MessageSquare,
   Phone,
-  Plus,
   Search,
   Send,
   ShieldAlert,
@@ -61,20 +59,25 @@ import { SmsShortcut, getSmsShortcuts } from '@/lib/smsShortcuts';
 import { getGoogleReviewMessage } from '@/lib/preferences';
 import { ClientFormModal } from '@/components/clients/ClientFormModal';
 import { SmsPickerModal } from '@/components/clients/SmsPickerModal';
+import FloatingActionButton from '@/components/ui/FloatingActionButton';
+import FilterButton from '@/components/ui/FilterButton';
 
 const FILTERS_CONFIG: Array<{ key: keyof ClientListFilters; label: string }> = [
-  { key: 'recents', label: 'RÃ©cents' },
-  { key: 'frequent', label: 'FrÃ©quents' },
+  { key: 'recents', label: 'Récents' },
+  { key: 'frequent', label: 'Fréquents' },
   { key: 'notes', label: 'Avec notes' },
   { key: 'vip', label: 'VIP' },
   { key: 'blacklist', label: 'Blacklist' },
 ];
 
 const SORT_OPTIONS: Array<{ key: ClientSortOption; label: string }> = [
-  { key: 'lastRide', label: 'DerniÃ¨re course' },
-  { key: 'totalCourses', label: 'Total courses' },
-  { key: 'alpha', label: 'Nom Aâ†’Z' },
+  { key: 'lastRide', label: 'Dernière course' },
+  { key: 'totalCourses', label: 'Total de courses' },
+  { key: 'alphaAsc', label: 'Nom (A–Z)' },
+  { key: 'alphaDesc', label: 'Nom (Z–A)' },
 ];
+
+const DEFAULT_SORT: ClientSortOption = 'lastRide';
 
 const FRENCH_MOBILE_REGEX = /^\+33(6|7)\d{8}$/;
 
@@ -108,13 +111,14 @@ export default function ClientsScreen() {
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [filters, setFilters] = useState<ClientListFilters>({
-    recents: false,
+    recents: true,
     frequent: false,
     notes: false,
     vip: false,
     blacklist: false,
   });
-  const [sort, setSort] = useState<ClientSortOption>('lastRide');
+  const [filtersPanelOpen, setFiltersPanelOpen] = useState(false);
+  const [sort, setSort] = useState<ClientSortOption>(DEFAULT_SORT);
   const [clients, setClients] = useState<ClientListItem[]>([]);
   const [listCursor, setListCursor] = useState<ClientCursor | null>(null);
   const [loading, setLoading] = useState(true);
@@ -211,6 +215,28 @@ export default function ClientsScreen() {
     setFilters((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
+  const activeFiltersCount = useMemo(
+    () => Object.values(filters).filter(Boolean).length,
+    [filters],
+  );
+
+  const filtersBadgeLabel = useMemo(() => {
+    const badges: string[] = [];
+    if (activeFiltersCount > 0) {
+      const suffix = activeFiltersCount > 1 ? 's' : '';
+      badges.push(`${activeFiltersCount} filtre${suffix}`);
+    }
+    if (sort !== DEFAULT_SORT) {
+      badges.push('Tri personnalisé');
+    }
+    return badges.join(' • ');
+  }, [activeFiltersCount, sort]);
+
+  const filtersButtonActive = filtersPanelOpen || Boolean(filtersBadgeLabel);
+
+  const openFiltersPanel = () => setFiltersPanelOpen(true);
+  const closeFiltersPanel = () => setFiltersPanelOpen(false);
+
   const handleSortChange = (value: ClientSortOption) => setSort(value);
 
   const openForm = (client?: ClientListItem) => {
@@ -267,7 +293,7 @@ export default function ClientsScreen() {
       const existing = await lookupClientByPhone(normalizedPhone);
       if (existing && existing.id !== formValues.id) {
         setDuplicate(existing);
-        setFormError('Ce numÃ©ro est déjà  associé à  un autre client.');
+        setFormError('Ce numéro est déjà associé à un autre client.');
         return;
       }
       const saved = await upsertClient({ ...formValues, phone: normalizedPhone });
@@ -409,7 +435,7 @@ export default function ClientsScreen() {
     router.push({ pathname: '/(tabs)/clients/[id]', params: { id: clientId } });
   };
 
-  const contentPaddingBottom = useMemo(() => Math.max(32, insets.bottom + 16), [insets.bottom]);
+  const contentPaddingBottom = useMemo(() => Math.max(120, insets.bottom + 80), [insets.bottom]);
 
   const renderHeader = () => (
     <View>
@@ -424,11 +450,13 @@ export default function ClientsScreen() {
             onChangeText={setSearch}
           />
         </View>
-        <TouchableOpacity style={styles.addButton} onPress={() => openForm()}>
-          <Plus size={18} color={COLORS.darkText} />
-          <Text style={styles.addButtonText}>Ajouter</Text>
-        </TouchableOpacity>
+        <FilterButton
+          onPress={openFiltersPanel}
+          active={filtersButtonActive}
+          accessibilityLabel="Ouvrir les filtres clients"
+        />
       </View>
+      {filtersBadgeLabel ? <Text style={styles.filtersSummary}>{filtersBadgeLabel}</Text> : null}
       <View style={styles.maskRow}>
         <Text style={styles.maskLabel}>Masquer les numéros</Text>
         <Switch
@@ -436,36 +464,6 @@ export default function ClientsScreen() {
           onValueChange={persistMaskPref}
           thumbColor={obfuscatePhones ? COLORS.azure : COLORS.textMuted}
         />
-      </View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filtersRow}>
-        {FILTERS_CONFIG.map((filter) => {
-          const active = filters[filter.key];
-          return (
-            <Pressable
-              key={filter.key}
-              style={[styles.filterChip, active && styles.filterChipActive]}
-              onPress={() => toggleFilter(filter.key)}
-            >
-              <Text style={[styles.filterLabel, active && styles.filterLabelActive]}>{filter.label}</Text>
-            </Pressable>
-          );
-        })}
-      </ScrollView>
-      <View style={styles.sortRow}>
-        <Filter size={16} color={COLORS.textMuted} />
-        <Text style={styles.sortLabel}>Tri :</Text>
-        {SORT_OPTIONS.map((option) => {
-          const active = sort === option.key;
-          return (
-            <Pressable
-              key={option.key}
-              onPress={() => handleSortChange(option.key)}
-              style={[styles.sortChip, active && styles.sortChipActive]}
-            >
-              <Text style={[styles.sortChipText, active && styles.sortChipTextActive]}>{option.label}</Text>
-            </Pressable>
-          );
-        })}
       </View>
       <Text style={styles.sortHint}>Choisissez l'ordre d'affichage (dernière course, activité, alphabétique).</Text>
     </View>
@@ -544,6 +542,12 @@ export default function ClientsScreen() {
         onEndReached={loadMore}
       />
 
+      <FloatingActionButton
+        onPress={() => openForm()}
+        accessibilityLabel="Ajouter un client"
+        bottomOffset={24}
+      />
+
       <ClientFormModal
         visible={formVisible}
         title={formValues.id ? 'Modifier le client' : 'Nouveau client'}
@@ -572,6 +576,54 @@ export default function ClientsScreen() {
         onSelect={handleSmsTemplate}
         onClose={() => setSmsPicker({ visible: false, client: null })}
       />
+
+      <Modal
+        visible={filtersPanelOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={closeFiltersPanel}
+      >
+        <View style={styles.filtersOverlay}>
+          <View style={styles.filtersSheet}>
+            <Text style={styles.filtersTitle}>Filtres clients</Text>
+            <View style={styles.filtersRow}>
+              {FILTERS_CONFIG.map((filter) => {
+                const active = filters[filter.key];
+                return (
+                  <Pressable
+                    key={filter.key}
+                    style={[styles.filterChip, active && styles.filterChipActive]}
+                    onPress={() => toggleFilter(filter.key)}
+                  >
+                    <Text style={[styles.filterLabel, active && styles.filterLabelActive]}>{filter.label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <View style={styles.sortRow}>
+              <Text style={styles.sortLabel}>Tri :</Text>
+              {SORT_OPTIONS.map((option) => {
+                const active = sort === option.key;
+                return (
+                  <Pressable
+                    key={option.key}
+                    onPress={() => handleSortChange(option.key)}
+                    style={[styles.sortChip, active && styles.sortChipActive]}
+                  >
+                    <Text style={[styles.sortChipText, active && styles.sortChipTextActive]}>{option.label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Text style={styles.sortHint}>Choisissez l'ordre d'affichage (dernière course, activité, alphabétique).</Text>
+            <View style={styles.filtersActions}>
+              <Pressable style={styles.filtersCloseBtn} onPress={closeFiltersPanel}>
+                <Text style={styles.filtersCloseBtnText}>Fermer</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -701,7 +753,7 @@ const formatLoyalty = (status: string) => {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: COLORS.background },
-  searchRow: { flexDirection: 'row', gap: 12, marginBottom: 12 },
+  searchRow: { flexDirection: 'row', gap: 12, marginBottom: 12, alignItems: 'center' },
   searchInput: {
     flex: 1,
     flexDirection: 'row',
@@ -713,15 +765,7 @@ const styles = StyleSheet.create({
     borderColor: COLORS.inputBorder,
   },
   searchField: { flex: 1, color: COLORS.text, marginLeft: 8 },
-  addButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.azure,
-    borderRadius: RADII.button,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  addButtonText: { color: COLORS.darkText, fontWeight: '700', marginLeft: 6 },
+  filtersSummary: { color: COLORS.textMuted, fontSize: 12, marginBottom: 8 },
   maskRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -729,7 +773,31 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   maskLabel: { color: COLORS.text, fontWeight: '600' },
-  filtersRow: { gap: 8, paddingBottom: 4 },
+  filtersRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingBottom: 4 },
+  filtersOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  filtersSheet: {
+    backgroundColor: COLORS.background,
+    borderRadius: RADII.card,
+    borderWidth: 1,
+    borderColor: COLORS.inputBorder,
+    padding: 20,
+    gap: 16,
+  },
+  filtersTitle: { color: COLORS.text, fontSize: 18, fontWeight: '800', textAlign: 'center' },
+  filtersActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12 },
+  filtersCloseBtn: {
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: RADII.button,
+    borderWidth: 1,
+    borderColor: COLORS.inputBorder,
+  },
+  filtersCloseBtnText: { color: COLORS.text, fontWeight: '700' },
   filterChip: {
     borderRadius: RADII.button,
     paddingHorizontal: 14,
@@ -740,7 +808,7 @@ const styles = StyleSheet.create({
   filterChipActive: { backgroundColor: COLORS.azure, borderColor: COLORS.azure },
   filterLabel: { color: COLORS.text },
   filterLabelActive: { color: COLORS.darkText, fontWeight: '700' },
-  sortRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8, marginBottom: 16 },
+  sortRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8, marginBottom: 16, flexWrap: 'wrap' },
   sortLabel: { color: COLORS.textMuted, fontWeight: '600' },
   sortChip: {
     borderRadius: RADII.button,
@@ -818,4 +886,10 @@ const styles = StyleSheet.create({
   },
   retryText: { color: COLORS.azure, fontWeight: '700' },
 });
+
+
+
+
+
+
 

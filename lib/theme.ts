@@ -3,6 +3,7 @@
 // Palette Resaura
 export const COLORS = {
   background: '#001f3b',         // fond app (marine profond)
+  backgroundDeep: '#00122a',     // fond renforc� (cartes planning, panneaux)
   azure: '#0de7f4',              // liens + CTA + états sélectionnés
   text: '#FFFFFF',               // texte principal
   textMuted: 'rgba(255,255,255,0.72)',
@@ -47,3 +48,4 @@ export const SHADOW = {
     elevation: 4,
   },
 };
+
