@@ -72,9 +72,14 @@ const FILTERS_CONFIG: Array<{ key: keyof ClientListFilters; label: string }> = [
 
 const SORT_OPTIONS: Array<{ key: ClientSortOption; label: string }> = [
   { key: 'lastRide', label: 'Dernière course' },
+<<<<<<< HEAD
   { key: 'totalCourses', label: 'Total de courses' },
   { key: 'alphaAsc', label: 'Nom (A–Z)' },
   { key: 'alphaDesc', label: 'Nom (Z–A)' },
+=======
+  { key: 'totalCourses', label: 'Total courses' },
+  { key: 'alpha', label: 'Nom A→Z' },
+>>>>>>> 135a6f84a57ba7d4a3719587af423f838a8db692
 ];
 
 const DEFAULT_SORT: ClientSortOption = 'lastRide';
@@ -659,7 +664,7 @@ function ClientCard({
           </Text>
           <View style={styles.clientMetaRow}>
             <Text style={styles.clientMetaText}>
-              {client.total_courses} courses Â· {formatCurrency(client.lifetime_value)}
+              {client.total_courses} courses · {formatCurrency(client.lifetime_value)}
             </Text>
             {client.loyalty_status && (
               <View style={styles.loyaltyPill}>
