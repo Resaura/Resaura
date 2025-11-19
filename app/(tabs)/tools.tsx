@@ -12,7 +12,7 @@ import {
   Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Power, Pause, Clock, FileText, Plus, X, Edit, Trash2, Send } from 'lucide-react-native';
+import { Power, Pause, Clock, FileText, Plus, X, Edit, Trash2, Send, Calculator } from 'lucide-react-native';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useAppAlert } from '@/contexts/AlertContext';
@@ -25,6 +25,7 @@ import {
 } from '@/lib/preferences';
 import { getSmsShortcuts, saveSmsShortcuts, type SmsShortcut } from '@/lib/smsShortcuts';
 import { useSwipeTabsNavigation } from '@/hooks/useSwipeTabsNavigation';
+import TvaCalculator from '@/components/tools/TvaCalculator';
 
 interface Note {
   id: string;
@@ -52,6 +53,7 @@ export default function ToolsScreen() {
   const [smsModalVisible, setSmsModalVisible] = useState(false);
   const [smsShortcutsState, setSmsShortcutsState] = useState<SmsShortcut[]>([]);
   const [smsDrafts, setSmsDrafts] = useState<Record<string, string>>({});
+  const [tvaCalculatorVisible, setTvaCalculatorVisible] = useState(false);
 
   const { user } = useAuth();
   const alert = useAppAlert();
@@ -357,6 +359,22 @@ export default function ToolsScreen() {
               </Text>
             </View>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.toolCard}
+            onPress={() => setTvaCalculatorVisible(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Ouvrir la calculatrice TVA"
+          >
+            <View style={styles.toolIconContainer}>
+              <Calculator size={28} color={COLORS.background} strokeWidth={2} />
+            </View>
+            <View style={styles.toolContent}>
+              <Text style={styles.toolTitle}>Calculatrice TVA</Text>
+              <Text style={styles.toolDescription}>
+                Convertissez rapidement vos montants HT/TTC avec les taux français.
+              </Text>
+            </View>
+          </TouchableOpacity>
         </View>
       </ScrollView>
 
@@ -549,6 +567,21 @@ export default function ToolsScreen() {
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
+      </Modal>
+      <Modal
+        visible={tvaCalculatorVisible}
+        animationType="slide"
+        onRequestClose={() => setTvaCalculatorVisible(false)}
+      >
+        <View style={[styles.modalContainer, { paddingBottom: safeBottom }]}>
+          <View style={[styles.modalHeader, { paddingTop: safeTop + 8 }]}>
+            <Text style={styles.modalTitle}>Calculatrice TVA</Text>
+            <TouchableOpacity onPress={() => setTvaCalculatorVisible(false)} accessibilityLabel="Fermer">
+              <X size={24} color={COLORS.textMuted} strokeWidth={2} />
+            </TouchableOpacity>
+          </View>
+          <TvaCalculator onClose={() => setTvaCalculatorVisible(false)} />
+        </View>
       </Modal>
     </View>
   );

@@ -94,6 +94,42 @@ const inRange = (iso: string, a: Date, b: Date) => {
   const t = new Date(iso).getTime();
   return t >= a.getTime() && t <= b.getTime();
 };
+const daysInMonthOf = (date: Date) => new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+const daysBetweenInclusive = (start: Date, end: Date) =>
+  Math.max(1, Math.round((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)) + 1);
+const aggregateTotals = (entries: Tx[]) =>
+  entries.reduce(
+    (acc, tx) => {
+      acc.ht += tx.amountHT;
+      acc.ttc += tx.amountTTC;
+      return acc;
+    },
+    { ht: 0, ttc: 0 },
+  );
+const computeGoalForPeriod = (
+  monthlyGoal: number,
+  period: Period,
+  referenceDate: Date,
+  fromDate: Date,
+  toDate: Date,
+) => {
+  const daysInMonth = Math.max(1, daysInMonthOf(referenceDate));
+  const dailyGoal = monthlyGoal / daysInMonth;
+  switch (period) {
+    case 'day':
+      return dailyGoal;
+    case 'week':
+      return dailyGoal * 7;
+    case 'month':
+      return monthlyGoal;
+    case 'year':
+      return monthlyGoal * 12;
+    case 'range':
+      return dailyGoal * daysBetweenInclusive(fromDate, toDate);
+    default:
+      return monthlyGoal;
+  }
+};
 
 /* ---------------- CALENDARS ---------------- */
 function monthMatrix(year: number, month: number) {
@@ -138,6 +174,7 @@ const CalendarRange = ({
   };
   const within = (d: Date) =>
     start && end ? inRange(d.toISOString(), startOfDay(start), endOfDay(end)) : false;
+  const rangeHighlight = `${selectedColor}33`;
 
   return (
     <View style={calStyles.wrap}>
@@ -171,7 +208,7 @@ const CalendarRange = ({
                 key={j}
                 style={[
                   calStyles.dayCell,
-                  between && { backgroundColor: COLORS.backgroundDeep },
+                  between && { backgroundColor: rangeHighlight },
                   selected && { backgroundColor: selectedColor },
                 ]}
                 onPress={() => select(d)}
@@ -256,11 +293,11 @@ const CalendarSingle = ({
 
 const calStyles = StyleSheet.create({
   wrap: {
-    backgroundColor: C.card,
+    backgroundColor: C.card2,
     borderRadius: RADII.card,
-    padding: 10,
+    padding: 12,
     borderWidth: 1,
-    borderColor: C.border,
+    borderColor: C.card2,
   },
   header: {
     flexDirection: 'row',
@@ -274,10 +311,10 @@ const calStyles = StyleSheet.create({
   dayCell: {
     width: 36,
     height: 36,
-    borderRadius: 8,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: C.card2,
+    backgroundColor: C.card,
   },
   dayText: { color: C.text },
 });
@@ -309,9 +346,15 @@ export default function FinanceScreen() {
   const [rangeModal, setRangeModal] = useState(false);
   const [txDateModal, setTxDateModal] = useState(false);
   const [showChartAsProgress, setShowChartAsProgress] = useState(false);
-  const [goalRevenue, setGoalRevenue] = useState<number>(1000);
-  const [goalExpense, setGoalExpense] = useState<number>(500);
+  const [goalRevenue, setGoalRevenue] = useState<{ ht: number; ttc: number }>({ ht: 1000, ttc: 1000 });
+  const [goalExpense, setGoalExpense] = useState<{ ht: number; ttc: number }>({ ht: 500, ttc: 500 });
   const [showTTC, setShowTTC] = useState<boolean>(true);
+  const [goalEditVisible, setGoalEditVisible] = useState(false);
+  const [goalEditValue, setGoalEditValue] = useState('');
+  const [goalEditTarget, setGoalEditTarget] = useState<{ side: Side; mode: 'HT' | 'TTC' }>({
+    side: 'revenu',
+    mode: 'TTC',
+  });
 
   // swipe pour basculer graphe <-> objectif
   const panResponder = useRef(
@@ -348,6 +391,8 @@ export default function FinanceScreen() {
   const [addModal, setAddModal] = useState(false);
   const [editCatModal, setEditCatModal] = useState(false);
   const [calcModal, setCalcModal] = useState(false);
+  const prevTvaRateRef = useRef<number>(tvaRate);
+  const skipTvaSyncRef = useRef(false);
 
   const [formSide, setFormSide] = useState<Side>('revenu');
   const [amountMode, setAmountMode] = useState<'HT' | 'TTC'>('TTC');
@@ -442,14 +487,10 @@ export default function FinanceScreen() {
     () => txs.filter((t) => t.side === side && inRange(t.dateISO, fromDate, toDate)),
     [txs, side, fromDate, toDate],
   );
-  const totalAll = useMemo(
-    () => txs.reduce((acc, t) => acc + t.amountTTC, 0),
-    [txs],
-  );
-  const totalCurrent = useMemo(
-    () => filteredTxs.reduce((acc, t) => acc + t.amountTTC, 0),
-    [filteredTxs],
-  );
+  const totalsAll = useMemo(() => aggregateTotals(txs), [txs]);
+  const totalsCurrent = useMemo(() => aggregateTotals(filteredTxs), [filteredTxs]);
+  const displayTotalAll = showTTC ? totalsAll.ttc : totalsAll.ht;
+  const displayTotalCurrent = showTTC ? totalsCurrent.ttc : totalsCurrent.ht;
 
   const perCategory = useMemo(() => {
     const map: Record<
@@ -465,12 +506,43 @@ export default function FinanceScreen() {
     }
     return Object.values(map).sort((a, b) => b.sumTTC - a.sumTTC);
   }, [filteredTxs, categories]);
+  const currentGoalConfig = side === 'revenu' ? goalRevenue : goalExpense;
+  const currentGoalMonthly = showTTC ? currentGoalConfig.ttc : currentGoalConfig.ht;
+  const periodGoalValue = useMemo(
+    () => computeGoalForPeriod(currentGoalMonthly, period, refDate, fromDate, toDate),
+    [currentGoalMonthly, period, refDate, fromDate, toDate],
+  );
+  const goalRemaining = Math.max(periodGoalValue - displayTotalCurrent, 0);
+  const goalProgressPct = periodGoalValue > 0 ? Math.min(1, displayTotalCurrent / periodGoalValue) : 0;
+  const openGoalEditModal = () => {
+    setGoalEditTarget({ side, mode: showTTC ? 'TTC' : 'HT' });
+    const config = side === 'revenu' ? goalRevenue : goalExpense;
+    const baseValue = showTTC ? config.ttc : config.ht;
+    setGoalEditValue(formatAmountInputValue(baseValue));
+    setGoalEditVisible(true);
+  };
+
+  const handleGoalEditSave = () => {
+    const normalized = goalEditValue.replace(',', '.').trim();
+    const parsed = Number.parseFloat(normalized);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      Alert.alert('Montant invalide', 'Merci de saisir un montant mensuel positif.');
+      return;
+    }
+    const key = goalEditTarget.mode === 'HT' ? 'ht' : 'ttc';
+    if (goalEditTarget.side === 'revenu') {
+      setGoalRevenue((prev) => ({ ...prev, [key]: parsed }));
+    } else {
+      setGoalExpense((prev) => ({ ...prev, [key]: parsed }));
+    }
+    setGoalEditVisible(false);
+  };
 
   /* 75% goal alert */
   useEffect(() => {
-    const goal = side === 'revenu' ? goalRevenue : goalExpense;
-    if (goal > 0) {
-      const pct = totalCurrent / goal;
+    const goalBase = side === 'revenu' ? goalRevenue.ttc : goalExpense.ttc;
+    if (goalBase > 0) {
+      const pct = totalsCurrent.ttc / goalBase;
       if (pct >= 0.75 && pct < 0.76) {
         Alert.alert(
           'Bravo !',
@@ -480,7 +552,7 @@ export default function FinanceScreen() {
         );
       }
     }
-  }, [totalCurrent, side, goalRevenue, goalExpense]);
+  }, [totalsCurrent.ttc, side, goalRevenue, goalExpense]);
 
   const movePeriod = (dir: -1 | 1) => {
     const d = new Date(refDate);
@@ -549,15 +621,13 @@ export default function FinanceScreen() {
 
   /* ----- Add transaction ----- */
   const addTx = () => {
-    const v = parseFloat((amountInput || '0').replace(',', '.'));
+    const v = parseAmountInput();
     if (!v || !chosenCat) {
-      Alert.alert('Erreur', 'Montant et catégorie requis.');
+      Alert.alert('Erreur', 'Montant et cat?gorie requis.');
       return;
     }
-    const rate = tvaRate / 100;
-    const amountTTC = amountMode === 'TTC' ? v : v * (1 + rate);
-    const amountHT = amountMode === 'HT' ? v : amountTTC / (1 + rate);
-
+    const amountHT = amountHTValue;
+    const amountTTC = amountTTCValue;
     const tx: Tx = {
       id: Date.now().toString(),
       side: formSide,
@@ -659,16 +729,27 @@ export default function FinanceScreen() {
 
   /* ---- SAFE EVAL for mini calculator ---- */
   const safeEval = (expr: string): number => {
-    if (!/^[0-9+\-*/().\s]+$/.test(expr)) return NaN;
+    if (!/^[0-9+\-*/().\s%]+$/.test(expr)) return NaN;
+    const withPercents = expr.replace(
+      /(\d+(?:\.\d+)?)%/g,
+      (_, num) => `(${num}/100)`,
+    );
     try {
       // eslint-disable-next-line no-new-func
-      const fn = new Function(`return (${expr});`);
+      const fn = new Function(`return (${withPercents});`);
       const res = fn();
       return typeof res === 'number' && isFinite(res) ? res : NaN;
     } catch {
       return NaN;
     }
   };
+  const parseAmountInputValue = (value: string) => {
+    const normalized = value.replace(',', '.');
+    const parsed = Number.parseFloat(normalized);
+    return Number.isNaN(parsed) ? 0 : parsed;
+  };
+  const formatAmountInputValue = (value: number) =>
+    Number.isFinite(value) ? value.toFixed(2).replace('.', ',') : '0';
 
   // Calculator state
   const [calcExpr, setCalcExpr] = useState<string>('');
@@ -719,14 +800,13 @@ export default function FinanceScreen() {
   const appendCalc = (t: string) =>
     setCalcExpr((prev) => (prev + t).slice(0, 64));
   const clearCalc = () => setCalcExpr('');
-  const backspaceCalc = () => setCalcExpr((prev) => prev.slice(0, -1));
   const eqCalc = () => {
     const r = safeEval(calcExpr);
     if (!isNaN(r)) setCalcExpr(String(r));
   };
   const applyCalcToAmount = () => {
     const r = safeEval(calcExpr);
-    if (!isNaN(r)) setAmountInput(String(r));
+    if (!isNaN(r)) setAmountInput(formatAmountInputValue(r));
     setCalcModal(false);
   };
   const applyTVAfromCalc = (dir: 'HT2TTC' | 'TTC2HT') => {
@@ -736,6 +816,48 @@ export default function FinanceScreen() {
     const val = dir === 'HT2TTC' ? r * (1 + rate) : r / (1 + rate);
     setCalcExpr(String(parseFloat(String(val))));
   };
+  const parseAmountInput = () => parseAmountInputValue(amountInput);
+  const handleAmountModeChange = (nextMode: 'HT' | 'TTC') => {
+    if (nextMode === amountMode) return;
+    const hasValue = amountInput.trim().length > 0;
+    if (!hasValue) {
+      setAmountMode(nextMode);
+      return;
+    }
+    const value = parseAmountInput();
+    const rateFactor = 1 + tvaRate / 100;
+    const htValue = amountMode === 'HT' ? value : value / rateFactor;
+    const nextValue = nextMode === 'HT' ? htValue : htValue * rateFactor;
+    setAmountMode(nextMode);
+    setAmountInput(formatAmountInputValue(nextValue));
+  };
+  const { amountHTValue, amountTTCValue } = useMemo(() => {
+    const value = parseAmountInput();
+    const rateFactor = 1 + tvaRate / 100;
+    const htValue = amountMode === 'HT' ? value : value / rateFactor;
+    const ttcValue = amountMode === 'TTC' ? value : value * rateFactor;
+    return { amountHTValue: htValue, amountTTCValue: ttcValue };
+  }, [amountInput, amountMode, tvaRate]);
+  useEffect(() => {
+    if (skipTvaSyncRef.current) {
+      skipTvaSyncRef.current = false;
+      prevTvaRateRef.current = tvaRate;
+      return;
+    }
+    const previousRate = prevTvaRateRef.current;
+    if (previousRate === tvaRate) return;
+    if (!amountInput.trim()) {
+      prevTvaRateRef.current = tvaRate;
+      return;
+    }
+    const prevFactor = 1 + previousRate / 100;
+    const baseValue = parseAmountInput();
+    const htValue = amountMode === 'HT' ? baseValue : baseValue / prevFactor;
+    const nextFactor = 1 + tvaRate / 100;
+    const nextValue = amountMode === 'HT' ? htValue : htValue * nextFactor;
+    setAmountInput(formatAmountInputValue(nextValue));
+    prevTvaRateRef.current = tvaRate;
+  }, [tvaRate, amountMode]); 
 
   /* UI */
   return (
@@ -748,8 +870,8 @@ export default function FinanceScreen() {
     >
       {/* Header total */}
       <View style={styles.header}>
-        <Text style={styles.totalLabel}>Total</Text>
-        <Text style={styles.totalValue}>{fmtEuros(totalAll)}</Text>
+        <Text style={styles.totalLabel}>Total {showTTC ? 'TTC' : 'HT'}</Text>
+        <Text style={styles.totalValue}>{fmtEuros(displayTotalAll)}</Text>
       </View>
 
       {/* Tabs side (sélection = turquoise) */}
@@ -823,17 +945,19 @@ export default function FinanceScreen() {
           <ChevronRight color={C.text} size={18} />
         </TouchableOpacity>
       </View>
+      {period === 'range' && (
+        <TouchableOpacity style={styles.rangeTrigger} onPress={() => setRangeModal(true)}>
+          <Text style={styles.rangeTriggerText}>Choisir une période</Text>
+        </TouchableOpacity>
+      )}
 
       {/* Chart card (+ swipe) */}
       <View style={styles.chartCard} {...panResponder.panHandlers}>
         <View style={styles.chartHeader}>
           <Text style={styles.chartTitle}>
-            {side === 'revenu' ? 'Revenus' : 'Dépenses'} -{' '}
-            {fmtEuros(totalCurrent)}
+            {side === 'revenu' ? 'Revenus' : 'Dépenses'} - {fmtEuros(displayTotalCurrent)}
           </Text>
-          <TouchableOpacity
-            onPress={() => setShowChartAsProgress((v) => !v)}
-          >
+          <TouchableOpacity onPress={() => setShowChartAsProgress((v) => !v)}>
             <Text style={styles.chartToggle}>
               {showChartAsProgress ? 'Afficher répartition' : 'Afficher objectif'}
             </Text>
@@ -843,54 +967,48 @@ export default function FinanceScreen() {
         {showChartAsProgress ? (
           <View style={styles.goalWrap}>
             <View style={styles.goalHeader}>
-              <Target size={18} color={C.accent2} />
-              <Text style={styles.goalLabel}>
-                Objectif {side === 'revenu' ? 'revenus' : 'dépenses'}
-              </Text>
+              <View style={styles.goalHeaderInfo}>
+                <Target size={18} color={C.accent2} />
+                <Text style={styles.goalLabel}>
+                  Objectif {side === 'revenu' ? 'revenus' : 'dépenses'}
+                </Text>
+              </View>
+              <TouchableOpacity style={styles.goalEditBtn} onPress={openGoalEditModal}>
+                <Text style={styles.goalEditBtnText}>Modifier</Text>
+              </TouchableOpacity>
             </View>
             <View style={styles.goalBar}>
               <View
                 style={[
                   styles.goalFill,
                   {
-                    width: `${Math.min(
-                      100,
-                      ((totalCurrent /
-                        (side === 'revenu' ? goalRevenue : goalExpense)) ||
-                        0) * 100,
-                    )}%`,
+                    width: `${goalProgressPct * 100}%`,
                   },
                 ]}
               />
             </View>
             <Text style={styles.goalPct}>
-              {side === 'revenu'
-                ? `${Math.min(
-                    100,
-                    (totalCurrent / (goalRevenue || 1)) * 100,
-                  ).toFixed(0)}% de ${fmtEuros(goalRevenue)}`
-                : `${Math.min(
-                    100,
-                    (totalCurrent / (goalExpense || 1)) * 100,
-                  ).toFixed(0)}% de ${fmtEuros(goalExpense)}`}
+              {goalRemaining > 0
+                ? `Il reste ${fmtEuros(goalRemaining)} sur ${fmtEuros(periodGoalValue)}`
+                : 'Objectif atteint !'}
             </Text>
+            <Text style={styles.goalSub}>Objectif mensuel : {fmtEuros(currentGoalMonthly)}</Text>
           </View>
         ) : (
           <View style={{ alignItems: 'center', paddingVertical: 8 }}>
             <Donut
-              value={totalCurrent}
-              total={Math.max(totalCurrent, 1)}
+              value={displayTotalCurrent}
+              total={Math.max(displayTotalCurrent, 1)}
               size={180}
               stroke={18}
               color={C.accent2}
             />
             <Text style={{ color: C.textMut, marginTop: 8 }}>
-              Glisse ↑ pour voir l&apos;objectif
+              Glisse ↑ pour voir l'objectif
             </Text>
           </View>
         )}
       </View>
-
       {/* HT/TTC switch (sélection = turquoise) */}
       <View style={styles.htttcRow}>
         <TouchableOpacity
@@ -924,7 +1042,7 @@ export default function FinanceScreen() {
       <ScrollView contentContainerStyle={{ paddingBottom: scrollPaddingBottom }}>
         {perCategory.slice(0, 10).map((it) => {
           const base = showTTC ? it.sumTTC : it.sumHT;
-          const pct = totalCurrent > 0 ? Math.round((it.sumTTC / totalCurrent) * 100) : 0;
+          const pct = displayTotalCurrent > 0 ? Math.round((base / displayTotalCurrent) * 100) : 0;
           return (
             <View key={it.cat.id} style={styles.catRow}>
               <View
@@ -1020,6 +1138,39 @@ export default function FinanceScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
+      {/* --------- MODAL ÉDITION OBJECTIF --------- */}
+      <Modal visible={goalEditVisible} transparent animationType="fade" onRequestClose={() => setGoalEditVisible(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+            <View style={styles.modalBox}>
+              <Text style={styles.modalTitle}>
+                Modifier l'objectif {goalEditTarget.side === 'revenu' ? 'revenus' : 'dépenses'}
+              </Text>
+              <Text style={styles.label}>Montant mensuel ({goalEditTarget.mode})</Text>
+              <TextInput
+                value={goalEditValue}
+                onChangeText={setGoalEditValue}
+                keyboardType="decimal-pad"
+                placeholder="ex: 6000"
+                placeholderTextColor={C.textMut}
+                style={styles.input}
+              />
+              <Text style={styles.goalEditHint}>
+                Ce montant se répartit automatiquement selon la période choisie (jour, semaine, mois, année) et suit la vue {showTTC ? 'TTC' : 'HT'} actuelle.
+              </Text>
+              <View style={styles.modalButtonsRow}>
+                <TouchableOpacity style={styles.cancelBtn} onPress={() => setGoalEditVisible(false)}>
+                  <Text style={styles.cancelBtnText}>Annuler</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.saveBtn, styles.selectedTurq]} onPress={handleGoalEditSave}>
+                  <Text style={[styles.saveBtnText, styles.selectedTextDark]}>Enregistrer</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </TouchableWithoutFeedback>
+        </KeyboardAvoidingView>
+      </Modal>
+
       {/* --------- MODAL NOUVELLE TRANSACTION (sélections TURQUOISE) --------- */}
       <Modal visible={addModal} transparent animationType="slide" statusBarTranslucent>
         <KeyboardAvoidingView
@@ -1027,8 +1178,12 @@ export default function FinanceScreen() {
           style={styles.modalOverlay}
         >
           <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-            <View style={styles.modalBox}>
-              <Text style={styles.modalTitle}>Nouvelle transaction</Text>
+            <View style={[styles.modalBox, styles.txModalBox]}>
+              <ScrollView
+                contentContainerStyle={styles.txModalContent}
+                showsVerticalScrollIndicator={false}
+              >
+                <Text style={styles.modalTitle}>Nouvelle transaction</Text>
 
               {/* Dépense / Revenu */}
               <View style={styles.row}>
@@ -1077,9 +1232,7 @@ export default function FinanceScreen() {
                   style={[styles.input, { flex: 1 }]}
                 />
                 <TouchableOpacity
-                  onPress={() =>
-                    setAmountMode((m) => (m === 'TTC' ? 'HT' : 'TTC'))
-                  }
+                  onPress={() => handleAmountModeChange(amountMode === 'TTC' ? 'HT' : 'TTC')}
                   style={[styles.pillMini, styles.selectedTurq]}
                 >
                   <Text
@@ -1240,9 +1393,11 @@ export default function FinanceScreen() {
                   </Text>
                 </TouchableOpacity>
               </View>
-              <Text style={{ color: C.textMut, marginBottom: 8 }}>
-                {dateObj.toLocaleDateString('fr-FR')}
-              </Text>
+              <View style={styles.dateDisplay}>
+                <Text style={styles.dateDisplayText}>
+                  {dateObj.toLocaleDateString('fr-FR')}
+                </Text>
+              </View>
 
               {/* Balises : tap = select/deselect, X = supprimer définitivement */}
               <Text style={styles.label}>Balises</Text>
@@ -1384,6 +1539,7 @@ export default function FinanceScreen() {
                   <Text style={styles.cancelBtnText}>Annuler</Text>
                 </TouchableOpacity>
               </View>
+            </ScrollView>
             </View>
           </TouchableWithoutFeedback>
         </KeyboardAvoidingView>
@@ -1641,83 +1797,84 @@ export default function FinanceScreen() {
               style={[styles.input, { fontSize: 18 }]}
               keyboardType="default"
             />
-            <View style={styles.calcRow}>
-              {['7', '8', '9', '/', '(', ')'].map((k) => (
+            <View style={styles.calcPad}>
+              <View style={styles.calcRow}>
+                {['7', '8', '9', '/', '(', ')'].map((k) => (
+                  <TouchableOpacity
+                    key={k}
+                    style={[styles.calcBtn]}
+                    onPress={() => appendCalc(k)}
+                  >
+                    <Text style={styles.calcTxt}>{k}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <View style={styles.calcRow}>
+                {['4', '5', '6', '*', '+', '-'].map((k) => (
+                  <TouchableOpacity
+                    key={k}
+                    style={styles.calcBtn}
+                    onPress={() => appendCalc(k)}
+                  >
+                    <Text style={styles.calcTxt}>{k}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <View style={styles.calcRow}>
+                {['1', '2', '3', '.', '%', 'C'].map((k) => (
+                  <TouchableOpacity
+                    key={k}
+                    style={styles.calcBtn}
+                    onPress={() => {
+                      if (k === 'C') return clearCalc();
+                      appendCalc(k);
+                    }}
+                  >
+                    <Text style={styles.calcTxt}>{k}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <View style={styles.calcRow}>
                 <TouchableOpacity
-                  key={k}
-                  style={[styles.calcBtn]}
-                  onPress={() => appendCalc(k)}
+                  style={[styles.calcBtn, styles.selectedTurq, { flex: 1 }]}
+                  onPress={() => eqCalc()}
                 >
-                  <Text style={styles.calcTxt}>{k}</Text>
+                  <Text
+                    style={[
+                      styles.calcTxt,
+                      styles.selectedTextDark,
+                    ]}
+                  >
+                    =
+                  </Text>
                 </TouchableOpacity>
-              ))}
-            </View>
-            <View style={styles.calcRow}>
-              {['4', '5', '6', '*', '+', '-'].map((k) => (
                 <TouchableOpacity
-                  key={k}
-                  style={styles.calcBtn}
-                  onPress={() => appendCalc(k)}
+                  style={[styles.calcBtn, styles.selectedTurq, { flex: 1 }]}
+                  onPress={() => applyTVAfromCalc('HT2TTC')}
                 >
-                  <Text style={styles.calcTxt}>{k}</Text>
+                  <Text
+                    style={[
+                      styles.calcTxt,
+                      styles.selectedTextDark,
+                    ]}
+                  >
+                    HT→TTC ({tvaRate}%)
+                  </Text>
                 </TouchableOpacity>
-              ))}
-            </View>
-            <View style={styles.calcRow}>
-              {['1', '2', '3', '.', '⌫', 'C'].map((k) => (
                 <TouchableOpacity
-                  key={k}
-                  style={styles.calcBtn}
-                  onPress={() => {
-                    if (k === 'C') return clearCalc();
-                    if (k === '⌫') return backspaceCalc();
-                    appendCalc(k);
-                  }}
+                  style={[styles.calcBtn, styles.selectedTurq, { flex: 1 }]}
+                  onPress={() => applyTVAfromCalc('TTC2HT')}
                 >
-                  <Text style={styles.calcTxt}>{k}</Text>
+                  <Text
+                    style={[
+                      styles.calcTxt,
+                      styles.selectedTextDark,
+                    ]}
+                  >
+                    TTC→HT ({tvaRate}%)
+                  </Text>
                 </TouchableOpacity>
-              ))}
-            </View>
-            <View style={styles.calcRow}>
-              <TouchableOpacity
-                style={[styles.calcBtn, styles.selectedTurq, { flex: 1 }]}
-                onPress={() => eqCalc()}
-              >
-                <Text
-                  style={[
-                    styles.calcTxt,
-                    styles.selectedTextDark,
-                  ]}
-                >
-                  =
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.calcBtn, styles.selectedTurq, { flex: 1 }]}
-                onPress={() => applyTVAfromCalc('HT2TTC')}
-              >
-                <Text
-                  style={[
-                    styles.calcTxt,
-                    styles.selectedTextDark,
-                  ]}
-                >
-                  HT→TTC ({tvaRate}%)
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.calcBtn, styles.selectedTurq, { flex: 1 }]}
-                onPress={() => applyTVAfromCalc('TTC2HT')}
-              >
-                <Text
-                  style={[
-                    styles.calcTxt,
-                    styles.selectedTextDark,
-                  ]}
-                >
-                  TTC→HT ({tvaRate}%)
-                </Text>
-              </TouchableOpacity>
+              </View>
             </View>
             <View style={styles.modalButtonsRow}>
               <TouchableOpacity
@@ -1752,7 +1909,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
 
   header: {
-    paddingTop: 40,
+    paddingTop: 16,
     paddingHorizontal: 16,
     paddingBottom: 6,
     alignItems: 'center',
@@ -1801,15 +1958,20 @@ const styles = StyleSheet.create({
   },
   arrowBtn: { backgroundColor: C.card2, padding: 8, borderRadius: RADII.button },
   periodText: { color: C.text, fontWeight: '700' },
+  rangeTrigger: {
+    marginHorizontal: 12,
+    marginBottom: 6,
+    paddingVertical: 10,
+    borderRadius: RADII.button,
+    alignItems: 'center',
+    backgroundColor: C.card2,
+  },
+  rangeTriggerText: { color: C.text, fontWeight: '700' },
 
   chartCard: {
-    backgroundColor: C.card,
-    margin: 12,
-    borderRadius: RADII.card,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: C.border,
-    ...SHADOW.card,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    marginTop: 8,
   },
   chartHeader: {
     flexDirection: 'row',
@@ -1820,7 +1982,16 @@ const styles = StyleSheet.create({
   chartToggle: { color: C.accent2, fontWeight: '700' },
 
   goalWrap: { marginTop: 8 },
-  goalHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  goalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  goalHeaderInfo: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  goalEditBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: RADII.button,
+    borderWidth: 1,
+    borderColor: C.accent2,
+  },
+  goalEditBtnText: { color: C.accent2, fontWeight: '700' },
   goalLabel: { color: C.text, fontWeight: '700' },
   goalBar: {
     height: 12,
@@ -1831,6 +2002,7 @@ const styles = StyleSheet.create({
   },
   goalFill: { height: '100%', backgroundColor: C.accent2 },
   goalPct: { color: C.textMut, marginTop: 6 },
+  goalSub: { color: C.textMut, fontSize: 12, marginTop: 4 },
 
   htttcRow: {
     flexDirection: 'row',
@@ -1891,10 +2063,18 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: C.border,
   },
+  txModalBox: {
+    backgroundColor: C.card2,
+    borderWidth: 0,
+    maxHeight: '92%',
+  },
+  txModalContent: {
+    paddingBottom: 32,
+  },
 
   modalTitle: { color: C.text, fontWeight: '800', fontSize: 18, marginBottom: 8 },
 
-  row: { flexDirection: 'row', gap: 8, marginBottom: 8, flexWrap: 'wrap' },
+  row: { flexDirection: 'row', gap: 8, marginBottom: 12, flexWrap: 'wrap' },
   pill: {
     backgroundColor: C.card2,
     paddingVertical: 8,
@@ -1903,7 +2083,13 @@ const styles = StyleSheet.create({
   },
   pillText: { color: C.text, fontWeight: '700' },
 
-  amountRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+  amountRow: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+    marginTop: 12,
+    marginBottom: 4,
+  },
   input: {
     backgroundColor: C.card2,
     color: C.text,
@@ -1925,7 +2111,7 @@ const styles = StyleSheet.create({
   tvaRow: {
     flexDirection: 'row',
     gap: 8,
-    marginTop: 8,
+    marginTop: 4,
     marginBottom: 4,
     flexWrap: 'wrap',
   },
@@ -1939,8 +2125,8 @@ const styles = StyleSheet.create({
 
   label: {
     color: C.textMut,
-    marginTop: 10,
-    marginBottom: 4,
+    marginTop: 14,
+    marginBottom: 6,
     fontWeight: '700',
   },
   catPickRow: {
@@ -1967,16 +2153,24 @@ const styles = StyleSheet.create({
   quickDatesRow: {
     flexDirection: 'row',
     gap: 8,
-    marginBottom: 4,
+    marginBottom: 6,
     flexWrap: 'wrap',
   },
   quickBtn: {
-    backgroundColor: C.card2,
+    backgroundColor: C.card,
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: RADII.button,
   },
   quickText: { color: C.text, fontWeight: '700' },
+  dateDisplay: {
+    backgroundColor: C.card2,
+    borderRadius: RADII.input,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginBottom: 10,
+  },
+  dateDisplayText: { color: C.text, fontWeight: '700' },
 
   tagsRow: {
     flexDirection: 'row',
@@ -1984,6 +2178,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexWrap: 'wrap',
   },
+  goalEditHint: { color: C.textMut, fontSize: 12, marginTop: 6 },
   chipsRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -2030,7 +2225,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'flex-end',
     gap: 8,
-    marginTop: 12,
+    marginTop: 18,
     flexWrap: 'wrap',
   },
   saveBtn: {
@@ -2083,6 +2278,12 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
 
+  calcPad: {
+    backgroundColor: C.card2,
+    borderRadius: RADII.card,
+    padding: 12,
+    marginTop: 12,
+  },
   calcRow: {
     flexDirection: 'row',
     gap: 8,
@@ -2091,7 +2292,7 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   calcBtn: {
-    backgroundColor: C.card2,
+    backgroundColor: C.card,
     paddingVertical: 10,
     paddingHorizontal: 12,
     borderRadius: RADII.button,
@@ -2101,4 +2302,6 @@ const styles = StyleSheet.create({
   },
   calcTxt: { color: C.text, fontWeight: '800' },
 });
+
+
 

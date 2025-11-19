@@ -1,0 +1,31 @@
+﻿        {showChartAsProgress ? (
+          <View style={styles.goalWrap}>
+            <View style={styles.goalHeader}>
+              <View style={styles.goalHeaderInfo}>
+                <Target size={18} color={C.accent2} />
+                <Text style={styles.goalLabel}>
+                  Objectif {side === 'revenu' ? 'revenus' : 'Dépenses'}
+                </Text>
+              </View>
+              <TouchableOpacity style={styles.goalEditBtn} onPress={openGoalEditModal}>
+                <Text style={styles.goalEditBtnText}>Modifier</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.goalBar}>
+              <View
+                style={[
+                  styles.goalFill,
+                  {
+                    width: `${goalProgressPct * 100}%`,
+                  },
+                ]}
+              />
+            </View>
+            <Text style={styles.goalPct}>
+              {goalRemaining > 0
+                ? `Il reste ${fmtEuros(goalRemaining)} sur ${fmtEuros(periodGoalValue)}`
+                : 'Objectif atteint !'}
+            </Text>
+            <Text style={styles.goalSub}>Objectif mensuel : {fmtEuros(currentGoalMonthly)}</Text>
+          </View>
+        ) : (

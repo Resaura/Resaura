@@ -1,0 +1,36 @@
+﻿        {showChartAsProgress ? (
+          <View style={styles.goalWrap}>
+            <View style={styles.goalHeader}>
+              <Target size={18} color={C.accent2} />
+              <Text style={styles.goalLabel}>
+                Objectif {side === 'revenu' ? 'revenus' : 'dÃ©penses'}
+              </Text>
+            </View>
+            <View style={styles.goalBar}>
+              <View
+                style={[
+                  styles.goalFill,
+                  {
+                    width: `${Math.min(
+                      100,
+                      ((totalsCurrent.ttc /
+                        (side === 'revenu' ? goalRevenue : goalExpense)) ||
+                        0) * 100,
+                    )}%`,
+                  },
+                ]}
+              />
+            </View>
+            <Text style={styles.goalPct}>
+              {side === 'revenu'
+                ? `${Math.min(
+                    100,
+                    (totalsCurrent.ttc / (goalRevenue || 1)) * 100,
+                  ).toFixed(0)}% de ${fmtEuros(goalRevenue)}`
+                : `${Math.min(
+                    100,
+                    (totalsCurrent.ttc / (goalExpense || 1)) * 100,
+                  ).toFixed(0)}% de ${fmtEuros(goalExpense)}`}
+            </Text>
+          </View>
+
