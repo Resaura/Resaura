@@ -357,10 +357,11 @@ export default function FinanceScreen() {
     mode: 'TTC',
   });
 
-  // swipe pour basculer graphe <-> objectif
+  // swipe vertical doux sur la carte pour basculer graphe <-> objectif (éviter de bloquer le scroll)
   const panResponder = useRef(
     PanResponder.create({
-      onMoveShouldSetPanResponder: (_evt, g) => Math.abs(g.dy) > 10,
+      onMoveShouldSetPanResponder: (_evt, g) =>
+        Math.abs(g.dy) > Math.abs(g.dx) * 1.5 && Math.abs(g.dy) > 36,
       onPanResponderRelease: (_evt, g) => {
         if (g.dy < -20) setShowChartAsProgress(true); // swipe up => objectif
         if (g.dy > 20) setShowChartAsProgress(false); // swipe down => répartition
@@ -728,22 +729,6 @@ export default function FinanceScreen() {
     return <Text style={styles.periodText}>{label}</Text>;
   };
 
-  /* ---- SAFE EVAL for mini calculator ---- */
-  const safeEval = (expr: string): number => {
-    if (!/^[0-9+\-*/().\s%]+$/.test(expr)) return NaN;
-    const withPercents = expr.replace(
-      /(\d+(?:\.\d+)?)%/g,
-      (_, num) => `(${num}/100)`,
-    );
-    try {
-      // eslint-disable-next-line no-new-func
-      const fn = new Function(`return (${withPercents});`);
-      const res = fn();
-      return typeof res === 'number' && isFinite(res) ? res : NaN;
-    } catch {
-      return NaN;
-    }
-  };
   const parseAmountInputValue = (value: string) => {
     const normalized = value.replace(',', '.');
     const parsed = Number.parseFloat(normalized);
@@ -752,10 +737,7 @@ export default function FinanceScreen() {
   const formatAmountInputValue = (value: number) =>
     Number.isFinite(value) ? value.toFixed(2).replace('.', ',') : '0';
 
-  // Calculator state
-  const [calcExpr, setCalcExpr] = useState<string>('');
-  const [pendingTxPrefill, setPendingTxPrefill] =
-    useState<TransactionPrefill | null>(null);
+  const [pendingTxPrefill, setPendingTxPrefill] = useState<TransactionPrefill | null>(null);
 
   useEffect(() => {
     if (!txPrefillParam) return;
@@ -798,30 +780,11 @@ export default function FinanceScreen() {
     setPendingTxPrefill(null);
   }, [pendingTxPrefill, categories]);
 
-  const appendCalc = (t: string) =>
-    setCalcExpr((prev) => (prev + t).slice(0, 64));
-  const clearCalc = () => setCalcExpr('');
-  const eqCalc = () => {
-    const r = safeEval(calcExpr);
-    if (!isNaN(r)) setCalcExpr(String(r));
-  };
-  const applyCalcToAmount = () => {
-    const r = safeEval(calcExpr);
-    if (!isNaN(r)) setAmountInput(formatAmountInputValue(r));
-    setCalcModal(false);
-  };
   const handleCalcApply = (result: { mode: 'ht' | 'ttc'; rate: number; ht: number; ttc: number }) => {
     setTvaRate(result.rate);
     setAmountMode(result.mode === 'ht' ? 'HT' : 'TTC');
     setAmountInput(formatAmountInputValue(result.mode === 'ht' ? result.ht : result.ttc));
     setCalcModal(false);
-  };
-  const applyTVAfromCalc = (dir: 'HT2TTC' | 'TTC2HT') => {
-    const r = safeEval(calcExpr);
-    if (isNaN(r)) return;
-    const rate = tvaRate / 100;
-    const val = dir === 'HT2TTC' ? r * (1 + rate) : r / (1 + rate);
-    setCalcExpr(String(parseFloat(String(val))));
   };
   const parseAmountInput = () => parseAmountInputValue(amountInput);
   const handleAmountModeChange = (nextMode: 'HT' | 'TTC') => {
@@ -1187,8 +1150,11 @@ export default function FinanceScreen() {
           <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
             <View style={[styles.modalBox, styles.txModalBox]}>
               <ScrollView
-                contentContainerStyle={styles.txModalContent}
+                style={{ flex: 1 }}
+                contentContainerStyle={[styles.txModalContent, { paddingBottom: 28, flexGrow: 1 }]}
                 showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                nestedScrollEnabled
               >
                 <Text style={styles.modalTitle}>Nouvelle transaction</Text>
 
@@ -1338,192 +1304,198 @@ export default function FinanceScreen() {
                 </View>
               </View>
 
-              {/* Date (rapides + calendrier) - boutons harmonisés */}
-              <Text style={styles.label}>Date</Text>
-              <View style={styles.quickDatesRow}>
-                <TouchableOpacity
-                  style={[
-                    styles.quickBtn,
-                    quickDate === 'today' && styles.selectedTurq,
-                  ]}
-                  onPress={() => {
-                    setDateObj(new Date());
-                    setQuickDate('today');
-                  }}
-                >
-                  <Text
-                    style={[
-                      styles.quickText,
-                      quickDate === 'today' && styles.selectedTextDark,
-                    ]}
-                  >
-                    aujourd&apos;hui
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.quickBtn,
-                    quickDate === 'yesterday' && styles.selectedTurq,
-                  ]}
-                  onPress={() => {
-                    const d = new Date();
-                    d.setDate(d.getDate() - 1);
-                    setDateObj(d);
-                    setQuickDate('yesterday');
-                  }}
-                >
-                  <Text
-                    style={[
-                      styles.quickText,
-                      quickDate === 'yesterday' && styles.selectedTextDark,
-                    ]}
-                  >
-                    hier
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.quickBtn,
-                    quickDate === 'calendar' && styles.selectedTurq,
-                  ]}
-                  onPress={() => {
-                    setTxDateModal(true);
-                    setQuickDate('calendar');
-                  }}
-                >
-                  <Text
-                    style={[
-                      styles.quickText,
-                      quickDate === 'calendar' && styles.selectedTextDark,
-                    ]}
-                  >
-                    Calendrier
-                  </Text>
-                </TouchableOpacity>
-              </View>
-              <View style={styles.dateDisplay}>
-                <Text style={styles.dateDisplayText}>
-                  {dateObj.toLocaleDateString('fr-FR')}
-                </Text>
-              </View>
-
-              {/* Balises : tap = select/deselect, X = supprimer définitivement */}
-              <Text style={styles.label}>Balises</Text>
-              <View style={styles.tagsRow}>
-                <TextInput
-                  placeholder="Ajouter une balise (ex: Hôtel, GeoWay.)"
-                  placeholderTextColor={C.textMut}
-                  value={tagInput}
-                  onChangeText={setTagInput}
-                  style={[styles.input, { flex: 1 }]}
-                />
-                <TouchableOpacity
-                  style={[styles.smallAction, styles.selectedTurq]}
-                  onPress={() => {
-                    const val = tagInput.trim();
-                    if (!val) return;
-                    if (!knownTags.includes(val))
-                      setKnownTags((prev) => [...prev, val]);
-                    if (!tags.includes(val))
-                      setTags((prev) => [...prev, val]);
-                    setTagInput('');
-                  }}
-                >
-                  <Text
-                    style={[
-                      styles.smallActionText,
-                      styles.selectedTextDark,
-                    ]}
-                  >
-                    Ajouter
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
-              <View style={styles.chipsRow}>
-                {knownTags.map((t) => {
-                  const active = tags.includes(t);
-                  return (
-                    <View
-                      key={t}
-                      style={[styles.chip, active && styles.selectedTurq]}
-                    >
-                      <TouchableOpacity
-                        onPress={() =>
-                          setTags((prev) =>
-                            active
-                              ? prev.filter((x) => x !== t)
-                              : [...prev, t],
-                          )
-                        }
-                        style={{ paddingHorizontal: 4, paddingVertical: 2 }}
-                      >
-                        <Text
-                          style={[
-                            styles.chipText,
-                            active && styles.selectedTextDark,
-                          ]}
-                        >
-                          {t}
-                        </Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        onPress={() => {
-                          Alert.alert(
-                            'Supprimer la balise ?',
-                            `"${t}" sera supprimée de la liste.`,
-                            [
-                              { text: 'Annuler', style: 'cancel' },
-                              {
-                                text: 'Supprimer',
-                                style: 'destructive',
-                                onPress: () => {
-                                  setKnownTags((prev) =>
-                                    prev.filter((x) => x !== t),
-                                  );
-                                  setTags((prev) =>
-                                    prev.filter((x) => x !== t),
-                                  );
-                                },
-                              },
-                            ],
-                          );
-                        }}
-                        style={styles.chipDel}
-                      >
-                        <X
-                          size={12}
-                          color={active ? C.darkInk : C.textMut}
-                        />
-                      </TouchableOpacity>
-                    </View>
-                  );
-                })}
-              </View>
-
-              {/* Commentaire + photos placeholder */}
-              <Text style={styles.label}>Commentaire</Text>
-              <TextInput
-                placeholder="Note (optionnel)"
-                placeholderTextColor={C.textMut}
-                value={note}
-                onChangeText={setNote}
-                style={[styles.input, { height: 70 }]}
-                multiline
-              />
-              <Text style={styles.label}>Photos (ticket, reçu.)</Text>
-              <View style={styles.photosRow}>
-                {[0, 1, 2].map((i) => (
+              <View style={styles.txBlock}>
+                {/* Date (rapides + calendrier) - boutons harmonisés */}
+                <Text style={styles.label}>Date</Text>
+                <View style={styles.quickDatesRow}>
                   <TouchableOpacity
-                    key={i}
-                    style={styles.photoSlot}
-                    onPress={() =>
-                      Alert.alert('Photo', "Sélection d'image (placeholder).")
-                    }
+                    style={[
+                      styles.quickBtn,
+                      quickDate === 'today' && styles.selectedTurq,
+                    ]}
+                    onPress={() => {
+                      setDateObj(new Date());
+                      setQuickDate('today');
+                    }}
                   >
-                    <Text style={{ color: C.textMut, fontSize: 22 }}>+</Text>
+                    <Text
+                      style={[
+                        styles.quickText,
+                        quickDate === 'today' && styles.selectedTextDark,
+                      ]}
+                    >
+                      aujourd&apos;hui
+                    </Text>
                   </TouchableOpacity>
-                ))}
+                  <TouchableOpacity
+                    style={[
+                      styles.quickBtn,
+                      quickDate === 'yesterday' && styles.selectedTurq,
+                    ]}
+                    onPress={() => {
+                      const d = new Date();
+                      d.setDate(d.getDate() - 1);
+                      setDateObj(d);
+                      setQuickDate('yesterday');
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.quickText,
+                        quickDate === 'yesterday' && styles.selectedTextDark,
+                      ]}
+                    >
+                      hier
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.quickBtn,
+                      quickDate === 'calendar' && styles.selectedTurq,
+                    ]}
+                    onPress={() => {
+                      setTxDateModal(true);
+                      setQuickDate('calendar');
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.quickText,
+                        quickDate === 'calendar' && styles.selectedTextDark,
+                      ]}
+                    >
+                      Calendrier
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.dateDisplay}>
+                  <Text style={styles.dateDisplayText}>
+                    {dateObj.toLocaleDateString('fr-FR')}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.txBlock}>
+                {/* Balises : tap = select/deselect, X = supprimer définitivement */}
+                <Text style={styles.label}>Balises</Text>
+                <View style={styles.tagsRow}>
+                  <TextInput
+                    placeholder="Ajouter une balise (ex: Hôtel, GeoWay.)"
+                    placeholderTextColor={C.textMut}
+                    value={tagInput}
+                    onChangeText={setTagInput}
+                    style={[styles.input, { flex: 1 }]}
+                  />
+                  <TouchableOpacity
+                    style={[styles.smallAction, styles.selectedTurq]}
+                    onPress={() => {
+                      const val = tagInput.trim();
+                      if (!val) return;
+                      if (!knownTags.includes(val))
+                        setKnownTags((prev) => [...prev, val]);
+                      if (!tags.includes(val))
+                        setTags((prev) => [...prev, val]);
+                      setTagInput('');
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.smallActionText,
+                        styles.selectedTextDark,
+                      ]}
+                    >
+                      Ajouter
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.chipsRow}>
+                  {knownTags.map((t) => {
+                    const active = tags.includes(t);
+                    return (
+                      <View
+                        key={t}
+                        style={[styles.chip, active && styles.selectedTurq]}
+                      >
+                        <TouchableOpacity
+                          onPress={() =>
+                            setTags((prev) =>
+                              active
+                                ? prev.filter((x) => x !== t)
+                                : [...prev, t],
+                            )
+                          }
+                          style={{ paddingHorizontal: 4, paddingVertical: 2 }}
+                        >
+                          <Text
+                            style={[
+                              styles.chipText,
+                              active && styles.selectedTextDark,
+                            ]}
+                          >
+                            {t}
+                          </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => {
+                            Alert.alert(
+                              'Supprimer la balise ?',
+                              `"${t}" sera supprimée de la liste.`,
+                              [
+                                { text: 'Annuler', style: 'cancel' },
+                                {
+                                  text: 'Supprimer',
+                                  style: 'destructive',
+                                  onPress: () => {
+                                    setKnownTags((prev) =>
+                                      prev.filter((x) => x !== t),
+                                    );
+                                    setTags((prev) =>
+                                      prev.filter((x) => x !== t),
+                                    );
+                                  },
+                                },
+                              ],
+                            );
+                          }}
+                          style={styles.chipDel}
+                        >
+                          <X
+                            size={12}
+                            color={active ? C.darkInk : C.textMut}
+                          />
+                        </TouchableOpacity>
+                      </View>
+                    );
+                  })}
+                </View>
+              </View>
+
+              <View style={styles.txBlock}>
+                {/* Commentaire + photos placeholder */}
+                <Text style={styles.label}>Commentaire</Text>
+                <TextInput
+                  placeholder="Note (optionnel)"
+                  placeholderTextColor={C.textMut}
+                  value={note}
+                  onChangeText={setNote}
+                  style={[styles.input, { height: 70 }]}
+                  multiline
+                />
+                <Text style={styles.label}>Photos (ticket, reçu.)</Text>
+                <View style={styles.photosRow}>
+                  {[0, 1, 2].map((i) => (
+                    <TouchableOpacity
+                      key={i}
+                      style={styles.photoSlot}
+                      onPress={() =>
+                        Alert.alert('Photo', "Sélection d'image (placeholder).")
+                      }
+                    >
+                      <Text style={{ color: C.textMut, fontSize: 22 }}>+</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
               </View>
 
               <View style={styles.modalButtonsRow}>
@@ -1789,122 +1761,36 @@ export default function FinanceScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* --------- MODAL MINI CALCULATRICE --------- */}
-      <Modal visible={calcModal} transparent animationType="fade">
+      {/* --------- MODAL MINI CALCULATRICE (plein écran opaque) --------- */}
+      <Modal
+        visible={calcModal}
+        transparent={false}
+        statusBarTranslucent
+        presentationStyle="fullScreen"
+        animationType="slide"
+      >
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.modalOverlay}
         >
-          <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>Calculatrice</Text>
-            <TextInput
-              value={calcExpr}
-              onChangeText={setCalcExpr}
-              placeholder="Saisis un calcul : 12*3+5"
-              placeholderTextColor={C.textMut}
-              style={[styles.input, { fontSize: 18 }]}
-              keyboardType="default"
+          <View
+            style={[
+              styles.calcFullScreenShell,
+              { paddingTop: safeTop, paddingBottom: safeBottom },
+            ]}
+          >
+            <View style={styles.calcHeaderRow}>
+              <TouchableOpacity onPress={() => setCalcModal(false)} style={styles.calcCloseBtn}>
+                <X size={22} color={C.text} />
+              </TouchableOpacity>
+            </View>
+            <TvaCalculator
+              initialMode={amountMode === 'HT' ? 'ht' : 'ttc'}
+              initialAmount={parseAmountInput()}
+              initialRate={tvaRate}
+              onApply={handleCalcApply}
+              onClose={() => setCalcModal(false)}
             />
-            <View style={styles.calcPad}>
-              <View style={styles.calcRow}>
-                {['7', '8', '9', '/', '(', ')'].map((k) => (
-                  <TouchableOpacity
-                    key={k}
-                    style={[styles.calcBtn]}
-                    onPress={() => appendCalc(k)}
-                  >
-                    <Text style={styles.calcTxt}>{k}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              <View style={styles.calcRow}>
-                {['4', '5', '6', '*', '+', '-'].map((k) => (
-                  <TouchableOpacity
-                    key={k}
-                    style={styles.calcBtn}
-                    onPress={() => appendCalc(k)}
-                  >
-                    <Text style={styles.calcTxt}>{k}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              <View style={styles.calcRow}>
-                {['1', '2', '3', '.', '%', 'C'].map((k) => (
-                  <TouchableOpacity
-                    key={k}
-                    style={styles.calcBtn}
-                    onPress={() => {
-                      if (k === 'C') return clearCalc();
-                      appendCalc(k);
-                    }}
-                  >
-                    <Text style={styles.calcTxt}>{k}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              <View style={styles.calcRow}>
-                <TouchableOpacity
-                  style={[styles.calcBtn, styles.selectedTurq, { flex: 1 }]}
-                  onPress={() => eqCalc()}
-                >
-                  <Text
-                    style={[
-                      styles.calcTxt,
-                      styles.selectedTextDark,
-                    ]}
-                  >
-                    =
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.calcBtn, styles.selectedTurq, { flex: 1 }]}
-                  onPress={() => applyTVAfromCalc('HT2TTC')}
-                >
-                  <Text
-                    style={[
-                      styles.calcTxt,
-                      styles.selectedTextDark,
-                    ]}
-                  >
-                    HT→TTC ({tvaRate}%)
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.calcBtn, styles.selectedTurq, { flex: 1 }]}
-                  onPress={() => applyTVAfromCalc('TTC2HT')}
-                >
-                  <Text
-                    style={[
-                      styles.calcTxt,
-                      styles.selectedTextDark,
-                    ]}
-                  >
-                    TTC→HT ({tvaRate}%)
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-            <View style={styles.modalButtonsRow}>
-              <TouchableOpacity
-                style={[styles.saveBtn, styles.selectedTurq]}
-                onPress={applyCalcToAmount}
-              >
-                <Text
-                  style={[
-                    styles.saveBtnText,
-                    styles.selectedTextDark,
-                  ]}
-                >
-                  Utiliser
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.cancelBtn}
-                onPress={() => setCalcModal(false)}
-              >
-                <Text style={styles.cancelBtnText}>Fermer</Text>
-              </TouchableOpacity>
-            </View>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -2057,7 +1943,7 @@ const styles = StyleSheet.create({
 
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
+    backgroundColor: C.bg,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 10,
@@ -2071,6 +1957,21 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: C.border,
   },
+  calcFullScreenShell: {
+    flex: 1,
+    width: '100%',
+    backgroundColor: C.card,
+    paddingHorizontal: 18,
+  },
+  calcHeaderRow: {
+    alignItems: 'flex-end',
+    marginBottom: 8,
+  },
+  calcCloseBtn: {
+    padding: 10,
+    borderRadius: RADII.button,
+    backgroundColor: C.card2,
+  },
   txBlock: {
     backgroundColor: C.card,
     borderRadius: RADII.card,
@@ -2082,7 +1983,10 @@ const styles = StyleSheet.create({
   txModalBox: {
     backgroundColor: C.card2,
     borderWidth: 0,
-    maxHeight: '92%',
+    maxHeight: '96%',
+    width: '98%',
+    alignSelf: 'center',
+    flex: 1,
   },
   txModalContent: {
     paddingBottom: 32,
@@ -2294,29 +2198,4 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
 
-  calcPad: {
-    backgroundColor: C.card2,
-    borderRadius: RADII.card,
-    padding: 12,
-    marginTop: 12,
-  },
-  calcRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 8,
-    justifyContent: 'space-between',
-    flexWrap: 'wrap',
-  },
-  calcBtn: {
-    backgroundColor: C.card,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: RADII.button,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 8,
-  },
-  calcTxt: { color: C.text, fontWeight: '800' },
 });
-
-
