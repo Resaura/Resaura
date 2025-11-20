@@ -23,6 +23,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSwipeTabsNavigation } from '@/hooks/useSwipeTabsNavigation';
 import { COLORS, RADII, SHADOW } from '@/lib/theme';
 import FloatingActionButton from '@/components/ui/FloatingActionButton';
+import TvaCalculator from '@/components/tools/TvaCalculator';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -809,6 +810,12 @@ export default function FinanceScreen() {
     if (!isNaN(r)) setAmountInput(formatAmountInputValue(r));
     setCalcModal(false);
   };
+  const handleCalcApply = (result: { mode: 'ht' | 'ttc'; rate: number; ht: number; ttc: number }) => {
+    setTvaRate(result.rate);
+    setAmountMode(result.mode === 'ht' ? 'HT' : 'TTC');
+    setAmountInput(formatAmountInputValue(result.mode === 'ht' ? result.ht : result.ttc));
+    setCalcModal(false);
+  };
   const applyTVAfromCalc = (dir: 'HT2TTC' | 'TTC2HT') => {
     const r = safeEval(calcExpr);
     if (isNaN(r)) return;
@@ -857,7 +864,7 @@ export default function FinanceScreen() {
     const nextValue = amountMode === 'HT' ? htValue : htValue * nextFactor;
     setAmountInput(formatAmountInputValue(nextValue));
     prevTvaRateRef.current = tvaRate;
-  }, [tvaRate, amountMode]); 
+  }, [tvaRate, amountMode]);
 
   /* UI */
   return (
@@ -1221,113 +1228,114 @@ export default function FinanceScreen() {
                 </TouchableOpacity>
               </View>
 
-              {/* Montant + HT/TTC + TVA + calc */}
-              <View style={styles.amountRow}>
-                <TextInput
-                  keyboardType="decimal-pad"
-                  placeholder={`Montant ${amountMode}`}
-                  placeholderTextColor={C.textMut}
-                  value={amountInput}
-                  onChangeText={setAmountInput}
-                  style={[styles.input, { flex: 1 }]}
-                />
-                <TouchableOpacity
-                  onPress={() => handleAmountModeChange(amountMode === 'TTC' ? 'HT' : 'TTC')}
-                  style={[styles.pillMini, styles.selectedTurq]}
-                >
-                  <Text
-                    style={[
-                      styles.pillMiniText,
-                      styles.selectedTextDark,
-                    ]}
-                  >
-                    {amountMode}
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => {
-                    setCalcExpr(amountInput || '');
-                    setCalcModal(true);
-                  }}
-                  style={[styles.iconBtn, styles.selectedTurq]}
-                >
-                  <Calculator size={18} color={C.darkInk} />
-                </TouchableOpacity>
-              </View>
-              <View style={styles.tvaRow}>
-                {[5.5, 10, 20].map((r) => (
+              <View style={styles.txBlock}>
+                {/* Montant + HT/TTC + TVA + calc */}
+                <View style={styles.amountRow}>
+                  <TextInput
+                    keyboardType="decimal-pad"
+                    placeholder={`Montant ${amountMode}`}
+                    placeholderTextColor={C.textMut}
+                    value={amountInput}
+                    onChangeText={setAmountInput}
+                    style={[styles.input, { flex: 1 }]}
+                  />
                   <TouchableOpacity
-                    key={r}
-                    onPress={() => setTvaRate(r)}
-                    style={[
-                      styles.tvaBtn,
-                      tvaRate === r && styles.selectedTurq,
-                    ]}
+                    onPress={() => handleAmountModeChange(amountMode === 'TTC' ? 'HT' : 'TTC')}
+                    style={[styles.pillMini, styles.selectedTurq]}
                   >
                     <Text
                       style={[
-                        styles.tvaText,
-                        tvaRate === r && styles.selectedTextDark,
+                        styles.pillMiniText,
+                        styles.selectedTextDark,
                       ]}
                     >
-                      {r}%
+                      {amountMode}
                     </Text>
                   </TouchableOpacity>
-                ))}
+                  <TouchableOpacity
+                    onPress={() => setCalcModal(true)}
+                    style={[styles.iconBtn, styles.selectedTurq]}
+                  >
+                    <Calculator size={18} color={C.darkInk} />
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.tvaRow}>
+                  {[5.5, 10, 20].map((r) => (
+                    <TouchableOpacity
+                      key={r}
+                      onPress={() => setTvaRate(r)}
+                      style={[
+                        styles.tvaBtn,
+                        tvaRate === r && styles.selectedTurq,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.tvaText,
+                          tvaRate === r && styles.selectedTextDark,
+                        ]}
+                      >
+                        {r}%
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
               </View>
 
-              {/* Catégories */}
-              <Text style={styles.label}>Catégorie</Text>
-              <View style={styles.catPickRow}>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                  {categories
-                    .filter((c) => c.side === formSide)
-                    .map((c) => {
-                      const selected = chosenCat === c.id;
-                      return (
-                        <TouchableOpacity
-                          key={c.id}
-                          style={[
-                            styles.catPick,
-                            selected && styles.selectedTurq,
-                          ]}
-                          onPress={() => setChosenCat(c.id)}
-                        >
-                          <Text style={{ fontSize: 16 }}>{c.icon}</Text>
-                          <Text
-                            numberOfLines={1}
+              <View style={styles.txBlock}>
+                {/* Catégories */}
+                <Text style={styles.label}>Catégorie</Text>
+                <View style={styles.catPickRow}>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    {categories
+                      .filter((c) => c.side === formSide)
+                      .map((c) => {
+                        const selected = chosenCat === c.id;
+                        return (
+                          <TouchableOpacity
+                            key={c.id}
                             style={[
-                              styles.catPickText,
-                              selected && styles.selectedTextDark,
+                              styles.catPick,
+                              selected && styles.selectedTurq,
                             ]}
+                            onPress={() => setChosenCat(c.id)}
                           >
-                            {c.name}
-                          </Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                </ScrollView>
-                <TouchableOpacity
-                  style={[styles.smallAction, styles.selectedTurq]}
-                  onPress={() => {
-                    setCatDraft({
-                      name: '',
-                      color: C.accent1,
-                      icon: '💰',
-                      side: formSide,
-                    });
-                    setEditCatModal(true);
-                  }}
-                >
-                  <Text
-                    style={[
-                      styles.smallActionText,
-                      styles.selectedTextDark,
-                    ]}
+                            <Text style={{ fontSize: 16 }}>{c.icon}</Text>
+                            <Text
+                              numberOfLines={1}
+                              style={[
+                                styles.catPickText,
+                                selected && styles.selectedTextDark,
+                              ]}
+                            >
+                              {c.name}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                  </ScrollView>
+                  <TouchableOpacity
+                    style={[styles.smallAction, styles.selectedTurq]}
+                    onPress={() => {
+                      setCatDraft({
+                        name: '',
+                        color: C.accent1,
+                        icon: '💰',
+                        side: formSide,
+                      });
+                      setEditCatModal(true);
+                    }}
                   >
-                    + Catégorie
-                  </Text>
-                </TouchableOpacity>
+                    <Text
+                      style={[
+                        styles.smallActionText,
+                        styles.selectedTextDark,
+                      ]}
+                    >
+                      + Catégorie
+                    </Text>
+                  </TouchableOpacity>
+                </View>
               </View>
 
               {/* Date (rapides + calendrier) - boutons harmonisés */}
@@ -2063,6 +2071,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: C.border,
   },
+  txBlock: {
+    backgroundColor: C.card,
+    borderRadius: RADII.card,
+    padding: 12,
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: C.card2,
+  },
   txModalBox: {
     backgroundColor: C.card2,
     borderWidth: 0,
@@ -2302,6 +2318,5 @@ const styles = StyleSheet.create({
   },
   calcTxt: { color: C.text, fontWeight: '800' },
 });
-
 
 

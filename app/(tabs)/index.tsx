@@ -299,6 +299,11 @@ export default function BookingsScreen() {
     }
   }, [load]);
 
+  useEffect(() => {
+    setPage(0);
+    load(true);
+  }, [status, load]);
+
   useFocusEffect(
     useCallback(() => {
       setPage(0);
@@ -1012,7 +1017,7 @@ return (
               label={s.label}
               selected={status === s.key}
               color={STATUS_FILTER_COLORS[s.key]}
-              onPress={() => { setStatus(prev => prev === s.key ? undefined : s.key); setPage(0); }}
+              onPress={() => setStatus((prev) => (prev === s.key ? undefined : s.key))}
             />
           ))}
         </View>
