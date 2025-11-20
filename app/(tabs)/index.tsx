@@ -1,6 +1,6 @@
 ﻿// app/(tabs)/bookings.tsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, Pressable, TextInput, Modal, Platform, Share, LayoutAnimation, UIManager, KeyboardAvoidingView, ScrollView, Linking, ActivityIndicator, PermissionsAndroid } from 'react-native';
+import { View, Text, StyleSheet, FlatList, Pressable, TextInput, Modal, Platform, Share, LayoutAnimation, UIManager, KeyboardAvoidingView, ScrollView, Linking, ActivityIndicator, PermissionsAndroid, Alert } from 'react-native';
 import type { TextInputProps } from 'react-native';
 import { Phone, Share2, Edit3, MapPin, RotateCcw, Star, LocateFixed, Clock3, Plane, TrainFront, Baby, Users, Luggage, ChevronRight } from 'lucide-react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -184,6 +184,22 @@ export default function BookingsScreen() {
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
   const clientSearchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const confirmAddToPortfolio = useCallback(
+    (first: string, last: string) =>
+      new Promise<boolean>((resolve) => {
+        const displayName = `${first || ''} ${last || ''}`.trim() || 'ce client';
+        Alert.alert(
+          'Ajouter au portefeuille ?',
+          `Ajouter ${displayName} au portefeuille clients ?`,
+          [
+            { text: 'Non', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'Oui', onPress: () => resolve(true) },
+          ],
+        );
+      }),
+    [],
+  );
+
   useEffect(() => {
     if (clientSearchTimeout.current) {
       clearTimeout(clientSearchTimeout.current);
@@ -282,6 +298,13 @@ export default function BookingsScreen() {
       setIsRefreshing(false);
     }
   }, [load]);
+
+  useFocusEffect(
+    useCallback(() => {
+      setPage(0);
+      load(true);
+    }, [load]),
+  );
 
   const openCreate = () => {
     setEditing(null);
@@ -644,17 +667,20 @@ export default function BookingsScreen() {
     setIsSaving(true);
     try {
       if (!editing && !selectedClientId) {
-        try {
-          setClientCreationLoading(true);
-          await quickCreateClient({
-            first_name: clientFirst,
-            last_name: clientLast,
-            phone,
-          });
-        } catch (error) {
-          console.warn('[Bookings] quickCreateClient error', error);
-        } finally {
-          setClientCreationLoading(false);
+        const consent = await confirmAddToPortfolio(clientFirst, clientLast);
+        if (consent) {
+          try {
+            setClientCreationLoading(true);
+            await quickCreateClient({
+              first_name: clientFirst,
+              last_name: clientLast,
+              phone,
+            });
+          } catch (error) {
+            console.warn('[Bookings] quickCreateClient error', error);
+          } finally {
+            setClientCreationLoading(false);
+          }
         }
       }
       const ok = editing

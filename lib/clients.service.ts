@@ -473,7 +473,14 @@ export async function toggleVip(id: string, value: boolean) {
 }
 
 export async function quickCreateClient(payload: QuickCreatePayload) {
-  const existing = await lookupClientByPhone(payload.phone);
+  let existing: ClientSummaryRow | null = null;
+  try {
+    existing = await lookupClientByPhone(payload.phone);
+  } catch (error) {
+    if (!(error instanceof ClientPortfolioUnavailableError)) {
+      throw error;
+    }
+  }
   if (existing) {
     return fetchClientDetail(existing.id);
   }

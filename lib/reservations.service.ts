@@ -42,6 +42,29 @@ export type ListParams = {
   pageSize?: number;
 };
 
+const STATUS_VALUES: Reservation['status'][] = ['a_venir', 'en_cours', 'terminee', 'annulee', 'no_show'];
+const STATUS_FILTER_ALIASES: Record<Reservation['status'], string[]> = {
+  a_venir: ['a_venir'],
+  en_cours: ['en_cours', 'en cours', 'encours'],
+  terminee: ['terminee', 'terminée', 'terminé', 'terminer', 'Terminee', 'Terminée', 'Terminé', 'Terminer'],
+  annulee: ['annulee', 'annulée', 'Annulee', 'Annulée', 'annule'],
+  no_show: ['no_show', 'no-show', 'noshow', 'No-show'],
+};
+
+const stripDiacritics = (value: string) =>
+  value.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+const normalizeStatusValue = (value?: string | null): Reservation['status'] => {
+  if (!value) return 'a_venir';
+  const sanitized = stripDiacritics(value).replace(/[\s-]+/g, '_').toLowerCase();
+  if (sanitized.includes('avenir')) return 'a_venir';
+  if (sanitized.includes('cours')) return 'en_cours';
+  if (sanitized.includes('termine')) return 'terminee';
+  if (sanitized.includes('annul')) return 'annulee';
+  if (sanitized.includes('show')) return 'no_show';
+  return STATUS_VALUES.find((candidate) => candidate === sanitized) ?? 'a_venir';
+};
+
 export async function listReservations(params: ListParams) {
   const {
     q, status, from, to,
@@ -53,7 +76,13 @@ export async function listReservations(params: ListParams) {
     .select('*', { count: 'exact' })
     .order('datetime', { ascending: true });
 
-  if (status) query = query.eq('status', status);
+  if (status) {
+    const aliases = STATUS_FILTER_ALIASES[status] ?? [status];
+    const unique = Array.from(new Set(aliases));
+    query = unique.length === 1
+      ? query.eq('status', unique[0])
+      : query.in('status', unique);
+  }
   if (from) query = query.gte('datetime', from);
   if (to) query = query.lte('datetime', to);
 
@@ -81,13 +110,21 @@ export async function listReservations(params: ListParams) {
     console.log('[reservations.list] error', error);
     return { items: [] as Reservation[], total: 0 };
   }
-  return { items: (data as Reservation[]) ?? [], total: count ?? 0 };
+  const rows = ((data as Reservation[]) ?? []).map((row) => ({
+    ...row,
+    status: normalizeStatusValue(row.status),
+  }));
+  return { items: rows, total: count ?? 0 };
 }
 
 export async function createReservation(payload: ReservationCreate) {
   const { data: { user }, error: authErr } = await supabase.auth.getUser();
   if (authErr || !user) { return false; }
-  const row = { ...payload, user_id: user.id, status: payload.status ?? 'a_venir' };
+  const row = {
+    ...payload,
+    user_id: user.id,
+    status: normalizeStatusValue(payload.status),
+  };
   const { error } = await supabase.from('reservations').insert(row);
   if (error) { console.log('[reservations.create] error', error); return false; }
   return true;
@@ -106,7 +143,7 @@ export async function removeReservation(id: string) {
 }
 
 export async function transitionReservation(id: string, next: Reservation['status']) {
-  const { error } = await supabase.from('reservations').update({ status: next }).eq('id', id);
+  const { error } = await supabase.from('reservations').update({ status: normalizeStatusValue(next) }).eq('id', id);
   if (error) { console.log('[reservations.transition] error', error); return false; }
   return true;
 }

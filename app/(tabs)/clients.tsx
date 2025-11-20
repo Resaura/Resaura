@@ -72,14 +72,9 @@ const FILTERS_CONFIG: Array<{ key: keyof ClientListFilters; label: string }> = [
 
 const SORT_OPTIONS: Array<{ key: ClientSortOption; label: string }> = [
   { key: 'lastRide', label: 'Dernière course' },
-<<<<<<< HEAD
   { key: 'totalCourses', label: 'Total de courses' },
   { key: 'alphaAsc', label: 'Nom (A–Z)' },
   { key: 'alphaDesc', label: 'Nom (Z–A)' },
-=======
-  { key: 'totalCourses', label: 'Total courses' },
-  { key: 'alpha', label: 'Nom A→Z' },
->>>>>>> 135a6f84a57ba7d4a3719587af423f838a8db692
 ];
 
 const DEFAULT_SORT: ClientSortOption = 'lastRide';
