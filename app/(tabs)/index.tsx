@@ -12,11 +12,12 @@ import { quickCreateClient } from '@/lib/clients.service';
 import { searchClients, type ClientSummary } from '@/lib/clients.search';
 import { getGoogleReviewMessage } from '@/lib/preferences';
 import { useAppAlert } from '@/contexts/AlertContext';
-import CalendarSingle from '@/lib/ui/CalendarSingle';
 import TimePicker from '@/lib/ui/TimePicker';
 import { useSwipeTabsNavigation } from '@/hooks/useSwipeTabsNavigation';
 import FloatingActionButton from '@/components/ui/FloatingActionButton';
 import FilterButton from '@/components/ui/FilterButton';
+import CalendarPickerModal from '@/components/ui/CalendarPickerModal';
+import CalendarSingle from '@/lib/ui/CalendarSingle';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -214,7 +215,7 @@ export default function BookingsScreen() {
     const first = form.client_first.trim();
     const phone = form.phone.trim();
     const querySource = last || first || phone;
-    if (!querySource || querySource.length < 2) {
+    if (!querySource || querySource.length < 1) {
       setClientLookup([]);
       setClientLookupLoading(false);
       return;
@@ -761,6 +762,7 @@ export default function BookingsScreen() {
             if (!ok) { alert.show('Erreur', 'Suppression échouée'); return; }
             closeModal();
             refresh();
+            (globalThis as any).__RESAURA_PLANNING_DIRTY = true;
           },
         },
       ],
@@ -1193,12 +1195,17 @@ return (
               <AddressInput label="Adresse d'arrivée" value={form.dropoff} onChangeText={(v)=>setForm(f=>({...f, dropoff:v}))} required />
 
               <Row>
-                <Pressable onPress={()=>setDateModal(true)} style={[styles.inputLike, styles.inputHalf]}>
-                  <Text style={styles.label}>Date</Text>
-                  <Text style={styles.inputLikeText}>
-                    {formDate.toLocaleDateString()}
-                  </Text>
-                </Pressable>
+              <Pressable onPress={()=>setDateModal(true)} style={[styles.inputLike, styles.inputHalf]}>
+                <Text style={styles.label}>Date</Text>
+                <Text style={styles.inputLikeText}>
+                  {new Intl.DateTimeFormat('fr-FR', {
+                    weekday: 'long',
+                    day: '2-digit',
+                    month: 'long',
+                    year: 'numeric',
+                  }).format(formDate)}
+                </Text>
+              </Pressable>
                 <Pressable onPress={()=>setTimeModal(true)} style={[styles.inputLike, styles.inputHalf]}>
                   <Text style={styles.label}>Heure</Text>
                   <View style={styles.timeField}>
@@ -1273,19 +1280,13 @@ return (
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* Calendrier (réutilisable) */}
-      <Modal visible={dateModal} transparent animationType="fade" onRequestClose={()=>setDateModal(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>Date</Text>
-            <CalendarSingle value={formDate} onChange={setFormDate} selectedColor={COLORS.azure} />
-            <View style={styles.modalButtonsRow}>
-              <Pressable style={styles.cta} onPress={()=>setDateModal(false)}><Text style={styles.ctaText}>Valider</Text></Pressable>
-              <Pressable style={styles.ghostBtn} onPress={()=>setDateModal(false)}><Text style={styles.ghostBtnText}>Annuler</Text></Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
+      <CalendarPickerModal
+        visible={dateModal}
+        value={formDate}
+        onCancel={()=>setDateModal(false)}
+        onConfirm={(d)=>{ setFormDate(d); setDateModal(false); }}
+        title="Date"
+      />
 
       {/* Horloge (réutilisable) */}
       <TimePicker
@@ -1474,7 +1475,7 @@ function AddressInput({ label, value, onChangeText, required }: AddressInputProp
   }, [value]);
 
   useEffect(() => {
-    if (!query || query.trim().length < 3) {
+    if (!query || query.trim().length < 1) {
       setSuggestions([]);
       setLoading(false);
       return;

@@ -19,8 +19,8 @@ import { useAppAlert } from '@/contexts/AlertContext';
 import { listReservations, type Reservation } from '@/lib/reservations.service';
 import { COLORS, RADII, SHADOW } from '@/lib/theme';
 import { useSwipeTabsNavigation } from '@/hooks/useSwipeTabsNavigation';
-import CalendarSingle from '@/lib/ui/CalendarSingle';
 import FloatingActionButton from '@/components/ui/FloatingActionButton';
+import CalendarPickerModal from '@/components/ui/CalendarPickerModal';
 
 const HOUR_BLOCK_HEIGHT = 60;
 const HOURS = Array.from({ length: 24 }, (_, idx) => idx);
@@ -177,12 +177,11 @@ export default function PlanningScreen() {
     setCalendarPickerOpen(true);
   };
 
-  const closeCalendarPicker = () => {
-    setCalendarPickerOpen(false);
-  };
+  const closeCalendarPicker = () => setCalendarPickerOpen(false);
 
-  const confirmCalendarPicker = () => {
-    setCursor(new Date(calendarSelection));
+  const confirmCalendarPicker = (next: Date) => {
+    setCursor(new Date(next));
+    setCalendarSelection(next);
     setCalendarPickerOpen(false);
   };
 
@@ -295,31 +294,13 @@ export default function PlanningScreen() {
         icon={<Calendar size={22} color={COLORS.darkText} />}
       />
 
-      <Modal
+      <CalendarPickerModal
         visible={calendarPickerOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={closeCalendarPicker}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>Choisir une date</Text>
-            <CalendarSingle
-              value={calendarSelection}
-              onChange={setCalendarSelection}
-              selectedColor={COLORS.azure}
-            />
-            <View style={styles.modalButtonsRow}>
-              <Pressable style={styles.ghostBtn} onPress={closeCalendarPicker}>
-                <Text style={styles.ghostBtnText}>Annuler</Text>
-              </Pressable>
-              <Pressable style={styles.ctaBtn} onPress={confirmCalendarPicker}>
-                <Text style={styles.ctaBtnText}>Aller à cette date</Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
+        value={calendarSelection}
+        onCancel={closeCalendarPicker}
+        onConfirm={confirmCalendarPicker}
+        title="Choisir une date"
+      />
 
       <ReservationDetailsModal
         visible={reservationModalOpen}

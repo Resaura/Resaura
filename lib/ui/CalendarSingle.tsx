@@ -12,24 +12,16 @@ type Props = {
 
 const WEEKDAYS = ['L', 'M', 'M', 'J', 'V', 'S', 'D'] as const;
 
-const startOfMonth = (date: Date) => {
-  const next = new Date(date);
-  next.setDate(1);
-  next.setHours(0, 0, 0, 0);
-  return next;
-};
+const makeDay = (y: number, m: number, d: number) =>
+  new Date(y, m, d, 12, 0, 0, 0); // midi pour éviter les bascules DST
 
-const addDays = (date: Date, delta: number) => {
-  const next = new Date(date);
-  next.setDate(next.getDate() + delta);
-  return next;
-};
+const startOfMonth = (date: Date) => makeDay(date.getFullYear(), date.getMonth(), 1);
 
-const addMonths = (date: Date, delta: number) => {
-  const next = new Date(date);
-  next.setMonth(next.getMonth() + delta);
-  return next;
-};
+const addDays = (date: Date, delta: number) =>
+  makeDay(date.getFullYear(), date.getMonth(), date.getDate() + delta);
+
+const addMonths = (date: Date, delta: number) =>
+  makeDay(date.getFullYear(), date.getMonth() + delta, 1);
 
 const isSameDay = (a: Date, b: Date) =>
   a.getFullYear() === b.getFullYear()
@@ -37,17 +29,22 @@ const isSameDay = (a: Date, b: Date) =>
   && a.getDate() === b.getDate();
 
 export default function CalendarSingle({ value, onChange, selectedColor }: Props) {
-  const today = useMemo(() => new Date(), []);
+  const today = useMemo(() => makeDay(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()), []);
   const monthStart = useMemo(() => startOfMonth(value), [value]);
   const firstWeekday = (monthStart.getDay() + 6) % 7; // Lundi = 0
 
-  const grid = useMemo(() => {
-    const days: Date[] = [];
-    const cursor = addDays(monthStart, -firstWeekday);
-    for (let i = 0; i < 42; i += 1) {
-      days.push(addDays(cursor, i));
+  const gridRows = useMemo(() => {
+    const rows: Date[][] = [];
+    let cursor = addDays(monthStart, -firstWeekday);
+    for (let week = 0; week < 6; week += 1) {
+      const weekDays: Date[] = [];
+      for (let day = 0; day < 7; day += 1) {
+        weekDays.push(cursor);
+        cursor = addDays(cursor, 1);
+      }
+      rows.push(weekDays);
     }
-    return days;
+    return rows;
   }, [firstWeekday, monthStart]);
 
   const monthLabel = value.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
@@ -81,27 +78,33 @@ export default function CalendarSingle({ value, onChange, selectedColor }: Props
       </View>
 
       <View style={styles.grid}>
-        {grid.map((day) => {
-          const inMonth = day.getMonth() === value.getMonth();
-          const selected = isSameDay(day, value);
-          const todayMark = isSameDay(day, today);
-          return (
-            <Pressable
-              key={day.toISOString()}
-              onPress={() => onChange(new Date(day))}
-              style={[
-                styles.cell,
-                selected && { backgroundColor: highlightColor, borderColor: highlightColor },
-                !inMonth && styles.cellMuted,
-                todayMark && !selected && styles.todayOutline,
-              ]}
-            >
-              <Text style={[styles.cellText, selected && styles.cellTextSelected]}>
-                {day.getDate()}
-              </Text>
-            </Pressable>
-          );
-        })}
+        {gridRows.map((week, idx) => (
+          <View key={`week-${idx}`} style={styles.weekRow}>
+            {week.map((day) => {
+              const inMonth = day.getMonth() === value.getMonth();
+              const selected = isSameDay(day, value);
+              const todayMark = isSameDay(day, today);
+              return (
+                <Pressable
+                  key={`${day.getFullYear()}-${day.getMonth()}-${day.getDate()}`}
+                  onPress={() =>
+                    onChange(makeDay(day.getFullYear(), day.getMonth(), day.getDate()))
+                  }
+                  style={[
+                    styles.cell,
+                    selected && { backgroundColor: highlightColor, borderColor: highlightColor },
+                    !inMonth && styles.cellMuted,
+                    todayMark && !selected && styles.todayOutline,
+                  ]}
+                >
+                  <Text style={[styles.cellText, selected && styles.cellTextSelected]}>
+                    {day.getDate()}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        ))}
       </View>
     </View>
   );
@@ -126,18 +129,19 @@ const styles = StyleSheet.create({
   title: { color: COLORS.text, fontWeight: '800', fontSize: 16 },
   weekdays: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
   weekday: { width: `${100 / 7}%`, textAlign: 'center', color: COLORS.textMuted, fontWeight: '700' },
-  grid: { flexDirection: 'row', flexWrap: 'wrap' },
+  grid: { flexDirection: 'column' },
+  weekRow: { flexDirection: 'row', marginBottom: 4, paddingHorizontal: 2 },
   cell: {
-    width: `${100 / 7}%`,
+    flex: 1,
     aspectRatio: 1,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: RADII.button,
-    marginVertical: 4,
+    marginHorizontal: 2,
+    paddingVertical: 2,
   },
   cellMuted: { opacity: 0.45 },
   todayOutline: { borderColor: COLORS.azure, borderWidth: 1 },
   cellText: { color: COLORS.text, fontWeight: '700' },
   cellTextSelected: { color: COLORS.darkText, fontWeight: '800' },
 });
-
