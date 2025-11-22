@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Linking,
@@ -334,11 +334,59 @@ function DayTimeline({
 } & ReservationActionProps) {
   const start = startOfDay(date).getTime();
   const dayDuration = 24 * 60;
+  const blocks = useMemo(() => {
+    return events.map((event) => {
+      const window = buildEventWindow(event);
+      const startMinutes = (window.startMs - start) / 60000;
+      const endMinutes = (window.endMs - start) / 60000;
+      const dropoffPrimary = extractDropoff(event.dropoff) || event.dropoff;
+      const segments = buildSegments(window);
+      return {
+        event,
+        window,
+        startMinutes,
+        endMinutes,
+        dropoffPrimary,
+        segments,
+      };
+    });
+  }, [events, extractDropoff, start]);
+  const { conflictedIds, pairs: conflictPairs } = useMemo(
+    () => detectConflicts(blocks),
+    [blocks],
+  );
+  const [conflictAcknowledged, setConflictAcknowledged] = useState(false);
+
+  useEffect(() => {
+    setConflictAcknowledged(false);
+  }, [date, events]);
+
   return (
-    <ScrollView
-      style={styles.timelineScroll}
-      contentContainerStyle={{ height: HOURS.length * HOUR_BLOCK_HEIGHT }}
-    >
+    <ScrollView style={styles.timelineScroll} contentContainerStyle={styles.timelineScrollContent}>
+      {!conflictAcknowledged && conflictPairs.length > 0 && (
+        <View style={styles.conflictBanner}>
+          <Text style={styles.conflictTitle}>Conflit d'horaires détecté</Text>
+          <Text style={styles.conflictBody}>
+            {conflictPairs.length === 1
+              ? 'Deux réservations se chevauchent.'
+              : `${conflictPairs.length} conflits détectés.`}
+          </Text>
+          <View style={styles.conflictActions}>
+            <Pressable
+              style={[styles.conflictBtn, styles.conflictBtnGhost]}
+              onPress={() => setConflictAcknowledged(true)}
+            >
+              <Text style={styles.conflictBtnGhostText}>Valider</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.conflictBtn, styles.conflictBtnPrimary]}
+              onPress={() => onReservationPress(conflictPairs[0].later.event)}
+            >
+              <Text style={styles.conflictBtnPrimaryText}>Modifier</Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
       <View style={styles.timeline}>
         {HOURS.map((hour) => (
           <View key={`h-${hour}`} style={styles.timelineRow}>
@@ -347,56 +395,67 @@ function DayTimeline({
           </View>
         ))}
         <View style={styles.timelineEventsLayer}>
-          {events.map((event) => {
-            const dt = new Date(event.datetime);
-            const minutesFromStart = (dt.getTime() - start) / 60000;
-            const durationMin = event.duration_min
-              ?? event.ride_duration_min
-              ?? event.return_duration_min
-              ?? 45;
-            const top = Math.max(0, (minutesFromStart / 60) * HOUR_BLOCK_HEIGHT);
+          {blocks.map((block) => {
+            const visibleStart = Math.max(0, block.startMinutes);
+            const visibleEnd = Math.min(dayDuration, block.endMinutes);
+            const visibleDuration = Math.max(15, visibleEnd - visibleStart);
+            const top = (visibleStart / 60) * HOUR_BLOCK_HEIGHT;
             const height = Math.max(
               48,
-              (durationMin / 60) * HOUR_BLOCK_HEIGHT,
+              (visibleDuration / 60) * HOUR_BLOCK_HEIGHT,
             );
-            const endMinutes = Math.min(
-              dayDuration,
-              minutesFromStart + durationMin,
-            );
-            const dropoffPrimary = extractDropoff(event.dropoff) || event.dropoff;
+            const dropoffPrimary = block.dropoffPrimary;
+            const startLabel = formatHourMinutes(Math.max(0, block.startMinutes));
+            const endLabel = formatHourMinutes(Math.min(dayDuration, block.endMinutes));
             return (
               <Pressable
-                key={event.id}
+                key={block.event.id}
                 style={[
                   styles.timelineEvent,
-                  { top, height: Math.min(height, HOURS.length * HOUR_BLOCK_HEIGHT - top) },
+                  {
+                    top,
+                    height: Math.min(height, HOURS.length * HOUR_BLOCK_HEIGHT - top),
+                  },
+                  conflictedIds.has(block.event.id) && styles.timelineEventConflict,
                 ]}
-                onPress={() => onReservationPress(event)}
+                onPress={() => onReservationPress(block.event)}
               >
+                <View style={styles.timelineSegments}>
+                  {block.segments.map((segment) => (
+                    <View
+                      key={segment.key}
+                      style={[
+                        styles.timelineSegment,
+                        segment.style,
+                        { flex: Math.max(segment.duration, 1) },
+                      ]}
+                    />
+                  ))}
+                </View>
                 <View style={styles.eventHeaderRow}>
                   <View>
                     <Text style={styles.eventClient}>
-                      {event.client_last} {event.client_first}
+                      {block.event.client_last} {block.event.client_first}
                     </Text>
                     <Text style={styles.eventTime}>
-                      {formatHourMinutes(minutesFromStart)} - {formatHourMinutes(endMinutes)}
+                      {startLabel} - {endLabel}
                     </Text>
                   </View>
                   <Pressable
                     style={styles.eventPhone}
-                    onPress={(pressEvent) => onCall(event.phone, pressEvent)}
+                    onPress={(pressEvent) => onCall(block.event.phone, pressEvent)}
                   >
                     <Phone size={14} color={COLORS.darkText} />
-                    <Text style={styles.eventPhoneText}>{event.phone ?? '—'}</Text>
+                    <Text style={styles.eventPhoneText}>{block.event.phone ?? '—'}</Text>
                   </Pressable>
                 </View>
                 <Pressable
                   style={styles.eventRow}
-                  onPress={(pressEvent) => onAddress('Départ', event.pickup, pressEvent)}
+                  onPress={(pressEvent) => onAddress('Départ', block.event.pickup, pressEvent)}
                 >
                   <MapPin size={14} color={COLORS.textOnLightMuted} />
                   <Text style={styles.eventMeta}>
-                    {event.pickup || 'Départ non défini'}
+                    {block.event.pickup || 'Départ non défini'}
                   </Text>
                 </Pressable>
                 <Pressable
@@ -436,6 +495,14 @@ function WeekBoard({
       {days.map((day) => {
         const key = formatDateKey(day);
         const items = reservationsByDay[key] ?? [];
+        const startMs = startOfDay(day).getTime();
+        const blocks = items.map((event) => {
+          const window = buildEventWindow(event);
+          const startMinutes = (window.startMs - startMs) / 60000;
+          const endMinutes = (window.endMs - startMs) / 60000;
+          return { event, window, startMinutes, endMinutes };
+        });
+        const { conflictedIds } = detectConflicts(blocks);
         return (
           <View key={key} style={styles.dayColumn}>
             <View style={styles.dayColumnHeader}>
@@ -451,7 +518,10 @@ function WeekBoard({
                 return (
                   <Pressable
                     key={event.id}
-                    style={styles.weekEventCard}
+                    style={[
+                      styles.weekEventCard,
+                      conflictedIds.has(event.id) && styles.weekEventCardConflict,
+                    ]}
                     onPress={() => onReservationPress(event)}
                   >
                     <View style={styles.eventHeaderRow}>
@@ -602,7 +672,10 @@ function formatRangeLabel(from: Date, to: Date, mode: ViewMode) {
 }
 
 function formatDateKey(date: Date) {
-  return date.toISOString().slice(0, 10);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 function formatDayShort(date: Date) {
@@ -610,10 +683,78 @@ function formatDayShort(date: Date) {
 }
 
 function formatHourMinutes(totalMinutes: number) {
-  const minutes = Math.max(0, totalMinutes);
-  const hour = Math.floor(minutes / 60) % 24;
+  const minutes = Math.max(0, Math.min(24 * 60, totalMinutes));
+  const hour = Math.floor(minutes / 60);
   const min = Math.floor(minutes % 60);
   return `${String(hour).padStart(2, '0')}h${String(min).padStart(2, '0')}`;
+}
+
+const APPROACH_COLOR = `${COLORS.azure}33`;
+const RIDE_COLOR = COLORS.azure;
+const RETURN_COLOR = `${COLORS.azure}33`;
+
+type ConflictBlock = {
+  event: Reservation;
+  startMinutes: number;
+  endMinutes: number;
+};
+
+type TimelineBlock = ConflictBlock & {
+  window: ReturnType<typeof buildEventWindow>;
+  dropoffPrimary?: string;
+  segments: { key: string; duration: number; style: any }[];
+};
+
+function buildEventWindow(event: Reservation) {
+  const pickup = new Date(event.datetime).getTime();
+  const approach = Math.max(0, event.approach_duration_min ?? 0);
+  let ride = Math.max(0, event.ride_duration_min ?? 0);
+  const fallback = Math.max(0, event.duration_min ?? 45);
+  if (ride === 0) ride = fallback || 45;
+  const returnDur = Math.max(0, event.return_duration_min ?? 0);
+  const total = Math.max(15, approach + ride + returnDur);
+  const startMs = pickup - approach * 60000;
+  const endMs = startMs + total * 60000;
+  return { approach, ride, returnDuration: returnDur, total, startMs, endMs };
+}
+
+function buildSegments(window: ReturnType<typeof buildEventWindow>) {
+  const segments: { key: string; duration: number; style: any }[] = [];
+  if (window.approach > 0) {
+    segments.push({ key: 'approach', duration: window.approach, style: { backgroundColor: APPROACH_COLOR } });
+  }
+  if (window.ride > 0) {
+    segments.push({ key: 'ride', duration: window.ride, style: { backgroundColor: RIDE_COLOR } });
+  }
+  if (window.returnDuration > 0) {
+    segments.push({ key: 'return', duration: window.returnDuration, style: { backgroundColor: RETURN_COLOR } });
+  }
+  return segments;
+}
+
+function detectConflicts<T extends ConflictBlock>(blocks: T[]) {
+  const sorted = [...blocks].sort((a, b) => a.startMinutes - b.startMinutes);
+  const active: T[] = [];
+  const pairs: { earlier: T; later: T }[] = [];
+  const conflictedIds = new Set<string>();
+
+  sorted.forEach((block) => {
+    for (let i = active.length - 1; i >= 0; i -= 1) {
+      if (active[i].endMinutes <= block.startMinutes) {
+        active.splice(i, 1);
+      }
+    }
+    active.forEach((current) => {
+      if (current.endMinutes > block.startMinutes) {
+        pairs.push({ earlier: current, later: block });
+        conflictedIds.add(current.event.id);
+        conflictedIds.add(block.event.id);
+      }
+    });
+    active.push(block);
+  });
+
+  return { pairs, conflictedIds };
 }
 
 const styles = StyleSheet.create({
@@ -665,6 +806,7 @@ const styles = StyleSheet.create({
   loader: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8 },
   loaderText: { color: COLORS.textMuted, fontWeight: '600' },
   timelineScroll: { flex: 1 },
+  timelineScrollContent: { paddingBottom: 24, minHeight: HOURS.length * HOUR_BLOCK_HEIGHT + 48, gap: 12 },
   timeline: {
     flex: 1,
     position: 'relative',
@@ -673,6 +815,27 @@ const styles = StyleSheet.create({
     borderRadius: RADII.card,
     paddingHorizontal: 12,
   },
+  conflictBanner: {
+    backgroundColor: `${COLORS.danger}22`,
+    borderRadius: RADII.card,
+    borderWidth: 1,
+    borderColor: COLORS.danger,
+    padding: 12,
+    gap: 6,
+  },
+  conflictTitle: { color: COLORS.danger, fontWeight: '800', fontSize: 16 },
+  conflictBody: { color: COLORS.text, fontWeight: '600' },
+  conflictActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 4 },
+  conflictBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: RADII.button,
+    borderWidth: 1,
+  },
+  conflictBtnGhost: { borderColor: COLORS.inputBorder },
+  conflictBtnPrimary: { borderColor: COLORS.azure, backgroundColor: COLORS.azure },
+  conflictBtnGhostText: { color: COLORS.text, fontWeight: '700' },
+  conflictBtnPrimaryText: { color: COLORS.darkText, fontWeight: '800' },
   timelineRow: { flexDirection: 'row', alignItems: 'center', height: HOUR_BLOCK_HEIGHT },
   timelineHour: { width: 48, color: COLORS.textMuted, fontWeight: '600' },
   timelineDivider: { flex: 1, height: 1, backgroundColor: COLORS.inputBorder },
@@ -688,6 +851,18 @@ const styles = StyleSheet.create({
     borderColor: COLORS.azure,
     ...SHADOW.card,
   },
+  timelineEventConflict: { borderColor: COLORS.danger },
+  timelineSegments: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderRadius: RADII.card,
+    overflow: 'hidden',
+    flexDirection: 'column',
+  },
+  timelineSegment: { flexGrow: 1 },
   eventHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, gap: 8 },
   eventClient: { color: COLORS.textOnLight, fontWeight: '800', marginBottom: 4 },
   eventClientOnLight: { color: COLORS.textOnLight },
@@ -728,6 +903,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     ...SHADOW.card,
   },
+  weekEventCardConflict: { borderColor: COLORS.danger },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.65)',

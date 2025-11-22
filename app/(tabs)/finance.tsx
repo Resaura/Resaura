@@ -7,6 +7,7 @@ import {
   StyleSheet,
   ScrollView,
   Modal,
+  Alert,
   LayoutAnimation,
   Platform,
   UIManager,
@@ -23,7 +24,6 @@ import { useSwipeTabsNavigation } from '@/hooks/useSwipeTabsNavigation';
 import { COLORS, RADII, SHADOW } from '@/lib/theme';
 import FloatingActionButton from '@/components/ui/FloatingActionButton';
 import TvaCalculator from '@/components/tools/TvaCalculator';
-import { useAppAlert } from '@/contexts/AlertContext';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -334,7 +334,6 @@ export default function FinanceScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const insets = useSafeAreaInsets();
-  const appAlert = useAppAlert();
   const safeTop = Math.max(32, insets.top + 12);
   const safeBottom = (insets.bottom || 0) + 8;
   const scrollPaddingBottom = safeBottom + 80;
@@ -529,7 +528,7 @@ export default function FinanceScreen() {
     const normalized = goalEditValue.replace(',', '.').trim();
     const parsed = Number.parseFloat(normalized);
     if (!Number.isFinite(parsed) || parsed <= 0) {
-      appAlert.show('Montant invalide', 'Merci de saisir un montant mensuel positif.');
+      Alert.alert('Montant invalide', 'Merci de saisir un montant mensuel positif.');
       return;
     }
     const key = goalEditTarget.mode === 'HT' ? 'ht' : 'ttc';
@@ -547,22 +546,910 @@ export default function FinanceScreen() {
     if (goalBase > 0) {
       const pct = totalsCurrent.ttc / goalBase;
       if (pct >= 0.75 && pct < 0.76) {
-        appAlert.show('Supprimer la balise ?', `"${t}" sera supprim�e de la liste.`, {
-                              actions: [
-                                { text: 'Annuler', variant: 'ghost' },
+        Alert.alert(
+          'Bravo !',
+          `Tu as dépassé 75% de ton objectif ${
+            side === 'revenu' ? 'revenu' : 'dépense'
+          }.`,
+        );
+      }
+    }
+  }, [totalsCurrent.ttc, side, goalRevenue, goalExpense]);
+
+  const movePeriod = (dir: -1 | 1) => {
+    const d = new Date(refDate);
+    if (period === 'day') d.setDate(d.getDate() + dir);
+    else if (period === 'week') d.setDate(d.getDate() + 7 * dir);
+    else if (period === 'month') d.setMonth(d.getMonth() + dir);
+    else if (period === 'year') d.setFullYear(d.getFullYear() + dir);
+    setRefDate(d);
+  };
+
+  const Donut = ({
+    value,
+    total,
+    size = 180,
+    stroke = 18,
+    color = C.accent2,
+  }: {
+    value: number;
+    total: number;
+    size?: number;
+    stroke?: number;
+    color?: string;
+  }) => {
+    const radius = (size - stroke) / 2;
+    const circ = 2 * Math.PI * radius;
+    const pct = total > 0 ? Math.min(1, value / total) : 0;
+    const dash = circ * pct;
+    return (
+      <View style={{ alignItems: 'center', justifyContent: 'center' }}>
+        <Svg width={size} height={size}>
+          <Circle
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            stroke={C.card2}
+            strokeWidth={stroke}
+            fill="none"
+          />
+          <Circle
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            stroke={color}
+            strokeWidth={stroke}
+            fill="none"
+            strokeDasharray={`${dash} ${circ - dash}`}
+            strokeLinecap="round"
+            rotation="-90"
+            originX={size / 2}
+            originY={size / 2}
+          />
+        </Svg>
+        <Text
+          style={{
+            position: 'absolute',
+            color: C.text,
+            fontWeight: '700',
+            fontSize: 22,
+          }}
+        >
+          {fmtEuros(value)}
+        </Text>
+      </View>
+    );
+  };
+
+  /* ----- Add transaction ----- */
+  const addTx = () => {
+    const v = parseAmountInput();
+    if (!v || !chosenCat) {
+      Alert.alert('Erreur', 'Montant et cat?gorie requis.');
+      return;
+    }
+    const amountHT = amountHTValue;
+    const amountTTC = amountTTCValue;
+    const tx: Tx = {
+      id: Date.now().toString(),
+      side: formSide,
+      amountHT,
+      tvaRate,
+      amountTTC,
+      categoryId: chosenCat,
+      dateISO: new Date(
+        dateObj.getFullYear(),
+        dateObj.getMonth(),
+        dateObj.getDate(),
+        0,
+        0,
+        0,
+        0,
+      ).toISOString(),
+      tags,
+      note,
+      photos: photoPlaceholders,
+    };
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setTxs((p) => [tx, ...p]);
+    tags.forEach((t) => {
+      if (!knownTags.includes(t)) setKnownTags((prev) => [...prev, t]);
+    });
+
+    setAmountInput('');
+    setChosenCat('');
+    setNote('');
+    setTags([]);
+    setPhotoPlaceholders([]);
+    setAddModal(false);
+  };
+
+  /* ----- Category CRUD ----- */
+  const saveCategory = () => {
+    if (!catDraft.name.trim()) {
+      Alert.alert('Nom requis', 'Donne un nom à la catégorie.');
+      return;
+    }
+    if (catDraft.id)
+      setCategories((prev) =>
+        prev.map((c) =>
+          c.id === catDraft.id ? ({ ...c, ...catDraft } as Category) : c,
+        ),
+      );
+    else
+      setCategories((prev) => [
+        ...prev,
+        { id: Date.now().toString(), ...catDraft } as Category,
+      ]);
+    setCatDraft({ name: '', color: C.accent1, icon: '💰', side: 'revenu' });
+    setEditCatModal(false);
+  };
+  const deleteCategory = (id: string) => {
+    Alert.alert('Supprimer', 'Supprimer cette catégorie ?', [
+      { text: 'Annuler', style: 'cancel' },
+      {
+        text: 'Supprimer',
+        style: 'destructive',
+        onPress: () => {
+          setCategories((prev) => prev.filter((c) => c.id !== id));
+          setTxs((prev) =>
+            prev.map((t) => (t.categoryId === id ? { ...t, categoryId: '' } : t)),
+          );
+        },
+      },
+    ]);
+  };
+
+  const PeriodLabel = () => {
+    let label = '';
+    if (period === 'day')
+      label = fromDate.toLocaleDateString('fr-FR', {
+        weekday: 'short',
+        day: '2-digit',
+        month: 'short',
+      });
+    else if (period === 'week')
+      label = `${fromDate.toLocaleDateString('fr-FR', {
+        day: '2-digit',
+        month: 'short',
+      })} - ${toDate.toLocaleDateString('fr-FR', {
+        day: '2-digit',
+        month: 'short',
+      })}`;
+    else if (period === 'month')
+      label = fromDate.toLocaleDateString('fr-FR', {
+        month: 'long',
+        year: 'numeric',
+      });
+    else if (period === 'year') label = String(fromDate.getFullYear());
+    else
+      label = `${rangeStart ? rangeStart.toLocaleDateString('fr-FR') : 'début'} - ${
+        rangeEnd ? rangeEnd.toLocaleDateString('fr-FR') : 'fin'
+      }`;
+    return <Text style={styles.periodText}>{label}</Text>;
+  };
+
+  const parseAmountInputValue = (value: string) => {
+    const normalized = value.replace(',', '.');
+    const parsed = Number.parseFloat(normalized);
+    return Number.isNaN(parsed) ? 0 : parsed;
+  };
+  const formatAmountInputValue = (value: number) =>
+    Number.isFinite(value) ? value.toFixed(2).replace('.', ',') : '0';
+
+  const [pendingTxPrefill, setPendingTxPrefill] = useState<TransactionPrefill | null>(null);
+
+  useEffect(() => {
+    if (!txPrefillParam) return;
+    const raw = Array.isArray(txPrefillParam) ? txPrefillParam[0] : txPrefillParam;
+    if (!raw) return;
+    try {
+      const decoded = JSON.parse(decodeURIComponent(raw));
+      setPendingTxPrefill(decoded);
+    } catch (error) {
+      console.warn('[finance] Unable to parse txPrefill', error);
+    } finally {
+      router.setParams({ txPrefill: undefined } as any);
+    }
+  }, [txPrefillParam, router]);
+
+  useEffect(() => {
+    if (!pendingTxPrefill) return;
+    const cibleCat = categories.find((c) => c.side === 'revenu');
+    setFormSide('revenu');
+    setAmountMode('TTC');
+    setAmountInput(
+      pendingTxPrefill.amount != null && !Number.isNaN(pendingTxPrefill.amount)
+        ? String(pendingTxPrefill.amount)
+        : '',
+    );
+    setChosenCat(cibleCat?.id || '');
+    setDateObj(pendingTxPrefill.datetime ? new Date(pendingTxPrefill.datetime) : new Date());
+    const noteLines = [
+      pendingTxPrefill.clientName
+        ? `Client : ${pendingTxPrefill.clientName}`
+        : null,
+      pendingTxPrefill.pickup && pendingTxPrefill.dropoff
+        ? `${pendingTxPrefill.pickup} → ${pendingTxPrefill.dropoff}`
+        : pendingTxPrefill.pickup || pendingTxPrefill.dropoff || null,
+    ]
+      .filter(Boolean)
+      .join('\n');
+    setNote(noteLines);
+    setAddModal(true);
+    setPendingTxPrefill(null);
+  }, [pendingTxPrefill, categories]);
+
+  const handleCalcApply = (result: { mode: 'ht' | 'ttc'; rate: number; ht: number; ttc: number }) => {
+    setTvaRate(result.rate);
+    setAmountMode(result.mode === 'ht' ? 'HT' : 'TTC');
+    setAmountInput(formatAmountInputValue(result.mode === 'ht' ? result.ht : result.ttc));
+    setCalcModal(false);
+  };
+  const parseAmountInput = () => parseAmountInputValue(amountInput);
+  const handleAmountModeChange = (nextMode: 'HT' | 'TTC') => {
+    if (nextMode === amountMode) return;
+    const hasValue = amountInput.trim().length > 0;
+    if (!hasValue) {
+      setAmountMode(nextMode);
+      return;
+    }
+    const value = parseAmountInput();
+    const rateFactor = 1 + tvaRate / 100;
+    const htValue = amountMode === 'HT' ? value : value / rateFactor;
+    const nextValue = nextMode === 'HT' ? htValue : htValue * rateFactor;
+    setAmountMode(nextMode);
+    setAmountInput(formatAmountInputValue(nextValue));
+  };
+  const { amountHTValue, amountTTCValue } = useMemo(() => {
+    const value = parseAmountInput();
+    const rateFactor = 1 + tvaRate / 100;
+    const htValue = amountMode === 'HT' ? value : value / rateFactor;
+    const ttcValue = amountMode === 'TTC' ? value : value * rateFactor;
+    return { amountHTValue: htValue, amountTTCValue: ttcValue };
+  }, [amountInput, amountMode, tvaRate]);
+  useEffect(() => {
+    if (skipTvaSyncRef.current) {
+      skipTvaSyncRef.current = false;
+      prevTvaRateRef.current = tvaRate;
+      return;
+    }
+    const previousRate = prevTvaRateRef.current;
+    if (previousRate === tvaRate) return;
+    if (!amountInput.trim()) {
+      prevTvaRateRef.current = tvaRate;
+      return;
+    }
+    const prevFactor = 1 + previousRate / 100;
+    const baseValue = parseAmountInput();
+    const htValue = amountMode === 'HT' ? baseValue : baseValue / prevFactor;
+    const nextFactor = 1 + tvaRate / 100;
+    const nextValue = amountMode === 'HT' ? htValue : htValue * nextFactor;
+    setAmountInput(formatAmountInputValue(nextValue));
+    prevTvaRateRef.current = tvaRate;
+  }, [tvaRate, amountMode]);
+
+  /* UI */
+  return (
+    <View
+      {...swipeHandlers}
+      style={[
+        styles.container,
+        { paddingTop: safeTop, paddingBottom: safeBottom },
+      ]}
+    >
+      {/* Header total */}
+      <View style={styles.header}>
+        <Text style={styles.totalLabel}>Total {showTTC ? 'TTC' : 'HT'}</Text>
+        <Text style={styles.totalValue}>{fmtEuros(displayTotalAll)}</Text>
+      </View>
+
+      {/* Tabs side (sélection = turquoise) */}
+      <View style={styles.sideTabs}>
+        <TouchableOpacity
+          onPress={() => setSide('depense')}
+          style={[styles.sideTab, side === 'depense' && styles.selectedTurq]}
+        >
+          <Text
+            style={[
+              styles.sideTabText,
+              side === 'depense' && styles.selectedTextDark,
+            ]}
+          >
+            DÉPENSES
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => setSide('revenu')}
+          style={[styles.sideTab, side === 'revenu' && styles.selectedTurq]}
+        >
+          <Text
+            style={[
+              styles.sideTabText,
+              side === 'revenu' && styles.selectedTextDark,
+            ]}
+          >
+            REVENUS
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Period tabs (sélection = turquoise) */}
+      <View style={styles.periodTabs}>
+        {(['day', 'week', 'month', 'year', 'range'] as Period[]).map((p) => (
+          <TouchableOpacity
+            key={p}
+            onPress={() => {
+              setPeriod(p);
+              if (p === 'range') setRangeModal(true);
+            }}
+            style={[styles.periodBtn, period === p && styles.selectedTurq]}
+          >
+            <Text
+              style={[
+                styles.periodBtnText,
+                period === p && styles.selectedTextDark,
+              ]}
+            >
+              {p === 'day'
+                ? 'Jour'
+                : p === 'week'
+                ? 'Semaine'
+                : p === 'month'
+                ? 'Mois'
+                : p === 'year'
+                ? 'Année'
+                : 'Période'}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {/* Period header with arrows */}
+      <View style={styles.periodHeader}>
+        <TouchableOpacity style={styles.arrowBtn} onPress={() => movePeriod(-1)}>
+          <ChevronLeft color={C.text} size={18} />
+        </TouchableOpacity>
+        <PeriodLabel />
+        <TouchableOpacity style={styles.arrowBtn} onPress={() => movePeriod(1)}>
+          <ChevronRight color={C.text} size={18} />
+        </TouchableOpacity>
+      </View>
+      {period === 'range' && (
+        <TouchableOpacity style={styles.rangeTrigger} onPress={() => setRangeModal(true)}>
+          <Text style={styles.rangeTriggerText}>Choisir une période</Text>
+        </TouchableOpacity>
+      )}
+
+      {/* Chart card (+ swipe) */}
+      <View style={styles.chartCard} {...panResponder.panHandlers}>
+        <View style={styles.chartHeader}>
+          <Text style={styles.chartTitle}>
+            {side === 'revenu' ? 'Revenus' : 'Dépenses'} - {fmtEuros(displayTotalCurrent)}
+          </Text>
+          <TouchableOpacity onPress={() => setShowChartAsProgress((v) => !v)}>
+            <Text style={styles.chartToggle}>
+              {showChartAsProgress ? 'Afficher répartition' : 'Afficher objectif'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {showChartAsProgress ? (
+          <View style={styles.goalWrap}>
+            <View style={styles.goalHeader}>
+              <View style={styles.goalHeaderInfo}>
+                <Target size={18} color={C.accent2} />
+                <Text style={styles.goalLabel}>
+                  Objectif {side === 'revenu' ? 'revenus' : 'dépenses'}
+                </Text>
+              </View>
+              <TouchableOpacity style={styles.goalEditBtn} onPress={openGoalEditModal}>
+                <Text style={styles.goalEditBtnText}>Modifier</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.goalBar}>
+              <View
+                style={[
+                  styles.goalFill,
+                  {
+                    width: `${goalProgressPct * 100}%`,
+                  },
+                ]}
+              />
+            </View>
+            <Text style={styles.goalPct}>
+              {goalRemaining > 0
+                ? `Il reste ${fmtEuros(goalRemaining)} sur ${fmtEuros(periodGoalValue)}`
+                : 'Objectif atteint !'}
+            </Text>
+            <Text style={styles.goalSub}>Objectif mensuel : {fmtEuros(currentGoalMonthly)}</Text>
+          </View>
+        ) : (
+          <View style={{ alignItems: 'center', paddingVertical: 8 }}>
+            <Donut
+              value={displayTotalCurrent}
+              total={Math.max(displayTotalCurrent, 1)}
+              size={180}
+              stroke={18}
+              color={C.accent2}
+            />
+            <Text style={{ color: C.textMut, marginTop: 8 }}>
+              Glisse ↑ pour voir l'objectif
+            </Text>
+          </View>
+        )}
+      </View>
+      {/* HT/TTC switch (sélection = turquoise) */}
+      <View style={styles.htttcRow}>
+        <TouchableOpacity
+          onPress={() => setShowTTC(false)}
+          style={[styles.htttcBtn, !showTTC && styles.selectedTurq]}
+        >
+          <Text
+            style={[
+              styles.htttcText,
+              !showTTC && styles.selectedTextDark,
+            ]}
+          >
+            HT
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => setShowTTC(true)}
+          style={[styles.htttcBtn, showTTC && styles.selectedTurq]}
+        >
+          <Text
+            style={[
+              styles.htttcText,
+              showTTC && styles.selectedTextDark,
+            ]}
+          >
+            TTC
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView contentContainerStyle={{ paddingBottom: scrollPaddingBottom }}>
+        {perCategory.slice(0, 10).map((it) => {
+          const base = showTTC ? it.sumTTC : it.sumHT;
+          const pct = displayTotalCurrent > 0 ? Math.round((base / displayTotalCurrent) * 100) : 0;
+          return (
+            <View key={it.cat.id} style={styles.catRow}>
+              <View
+                style={[
+                  styles.catIcon,
+                  { backgroundColor: `${it.cat.color}33` },
+                ]}
+              >
+                <Text style={styles.catIconText} numberOfLines={1}>
+                  {it.cat.icon}
+                </Text>
+              </View>
+              <View style={{ flex: 1, paddingRight: 8 }}>
+                <Text style={styles.catName} numberOfLines={1}>
+                  {it.cat.name}
+                </Text>
+                <Text style={styles.catPct}>{pct} %</Text>
+              </View>
+              <Text style={styles.catAmount}>{fmtEuros(base)}</Text>
+            </View>
+          );
+        })}
+        {perCategory.length === 0 && (
+          <Text
+            style={{
+              color: C.textMut,
+              textAlign: 'center',
+              marginTop: 12,
+            }}
+          >
+            Aucune transaction dans cette période.
+          </Text>
+        )}
+      </ScrollView>
+
+      <FloatingActionButton
+        onPress={() => {
+          setFormSide(side);
+          setAmountMode('TTC');
+          setAmountInput('');
+          setTvaRate(20);
+          setChosenCat(categories.find((c) => c.side === side)?.id || '');
+          setDateObj(new Date());
+          setQuickDate(null);
+          setTags([]);
+          setNote('');
+          setAddModal(true);
+        }}
+        accessibilityLabel="Ajouter une transaction"
+      />
+
+      {/* --------- MODAL RANGE (sélection turquoise) --------- */}
+      <Modal visible={period === 'range' && rangeModal} transparent animationType="fade">
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalOverlay}
+        >
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+            <View style={styles.modalBox}>
+              <Text style={styles.modalTitle}>Choisir une période</Text>
+              <CalendarRange
+                start={rangeStart}
+                end={rangeEnd}
+                onChange={(s, e) => {
+                  setRangeStart(s);
+                  setRangeEnd(e);
+                }}
+                selectedColor={C.accent2}
+              />
+              <View style={styles.modalButtonsRow}>
+                <TouchableOpacity
+                  style={[styles.saveBtn, styles.selectedTurq]}
+                  onPress={() => setRangeModal(false)}
+                >
+                  <Text
+                    style={[
+                      styles.saveBtnText,
+                      styles.selectedTextDark,
+                    ]}
+                  >
+                    Valider
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.cancelBtn}
+                  onPress={() => setRangeModal(false)}
+                >
+                  <Text style={styles.cancelBtnText}>Annuler</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </TouchableWithoutFeedback>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* --------- MODAL ÉDITION OBJECTIF --------- */}
+      <Modal visible={goalEditVisible} transparent animationType="fade" onRequestClose={() => setGoalEditVisible(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+            <View style={styles.modalBox}>
+              <Text style={styles.modalTitle}>
+                Modifier l'objectif {goalEditTarget.side === 'revenu' ? 'revenus' : 'dépenses'}
+              </Text>
+              <Text style={styles.label}>Montant mensuel ({goalEditTarget.mode})</Text>
+              <TextInput
+                value={goalEditValue}
+                onChangeText={setGoalEditValue}
+                keyboardType="decimal-pad"
+                placeholder="ex: 6000"
+                placeholderTextColor={C.textMut}
+                style={styles.input}
+              />
+              <Text style={styles.goalEditHint}>
+                Ce montant se répartit automatiquement selon la période choisie (jour, semaine, mois, année) et suit la vue {showTTC ? 'TTC' : 'HT'} actuelle.
+              </Text>
+              <View style={styles.modalButtonsRow}>
+                <TouchableOpacity style={styles.cancelBtn} onPress={() => setGoalEditVisible(false)}>
+                  <Text style={styles.cancelBtnText}>Annuler</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.saveBtn, styles.selectedTurq]} onPress={handleGoalEditSave}>
+                  <Text style={[styles.saveBtnText, styles.selectedTextDark]}>Enregistrer</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </TouchableWithoutFeedback>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* --------- MODAL NOUVELLE TRANSACTION (sélections TURQUOISE) --------- */}
+      <Modal visible={addModal} transparent animationType="slide" statusBarTranslucent>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalOverlay}
+        >
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+            <View style={[styles.modalBox, styles.txModalBox]}>
+              <ScrollView
+                style={{ flex: 1 }}
+                contentContainerStyle={[styles.txModalContent, { paddingBottom: 28, flexGrow: 1 }]}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                nestedScrollEnabled
+              >
+                <Text style={styles.modalTitle}>Nouvelle transaction</Text>
+
+              {/* Dépense / Revenu */}
+              <View style={styles.row}>
+                <TouchableOpacity
+                  onPress={() => setFormSide('depense')}
+                  style={[
+                    styles.pill,
+                    formSide === 'depense' && styles.selectedTurq,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.pillText,
+                      formSide === 'depense' && styles.selectedTextDark,
+                    ]}
+                  >
+                    Dépense
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => setFormSide('revenu')}
+                  style={[
+                    styles.pill,
+                    formSide === 'revenu' && styles.selectedTurq,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.pillText,
+                      formSide === 'revenu' && styles.selectedTextDark,
+                    ]}
+                  >
+                    Revenu
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.txBlock}>
+                {/* Montant + HT/TTC + TVA + calc */}
+                <View style={styles.amountRow}>
+                  <TextInput
+                    keyboardType="decimal-pad"
+                    placeholder={`Montant ${amountMode}`}
+                    placeholderTextColor={C.textMut}
+                    value={amountInput}
+                    onChangeText={setAmountInput}
+                    style={[styles.input, { flex: 1 }]}
+                  />
+                  <TouchableOpacity
+                    onPress={() => handleAmountModeChange(amountMode === 'TTC' ? 'HT' : 'TTC')}
+                    style={[styles.pillMini, styles.selectedTurq]}
+                  >
+                    <Text
+                      style={[
+                        styles.pillMiniText,
+                        styles.selectedTextDark,
+                      ]}
+                    >
+                      {amountMode}
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => setCalcModal(true)}
+                    style={[styles.iconBtn, styles.selectedTurq]}
+                  >
+                    <Calculator size={18} color={C.darkInk} />
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.tvaRow}>
+                  {[5.5, 10, 20].map((r) => (
+                    <TouchableOpacity
+                      key={r}
+                      onPress={() => setTvaRate(r)}
+                      style={[
+                        styles.tvaBtn,
+                        tvaRate === r && styles.selectedTurq,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.tvaText,
+                          tvaRate === r && styles.selectedTextDark,
+                        ]}
+                      >
+                        {r}%
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              <View style={styles.txBlock}>
+                {/* Catégories */}
+                <Text style={styles.label}>Catégorie</Text>
+                <View style={styles.catPickRow}>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    {categories
+                      .filter((c) => c.side === formSide)
+                      .map((c) => {
+                        const selected = chosenCat === c.id;
+                        return (
+                          <TouchableOpacity
+                            key={c.id}
+                            style={[
+                              styles.catPick,
+                              selected && styles.selectedTurq,
+                            ]}
+                            onPress={() => setChosenCat(c.id)}
+                          >
+                            <Text style={{ fontSize: 16 }}>{c.icon}</Text>
+                            <Text
+                              numberOfLines={1}
+                              style={[
+                                styles.catPickText,
+                                selected && styles.selectedTextDark,
+                              ]}
+                            >
+                              {c.name}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                  </ScrollView>
+                  <TouchableOpacity
+                    style={[styles.smallAction, styles.selectedTurq]}
+                    onPress={() => {
+                      setCatDraft({
+                        name: '',
+                        color: C.accent1,
+                        icon: '💰',
+                        side: formSide,
+                      });
+                      setEditCatModal(true);
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.smallActionText,
+                        styles.selectedTextDark,
+                      ]}
+                    >
+                      + Catégorie
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <View style={styles.txBlock}>
+                {/* Date (rapides + calendrier) - boutons harmonisés */}
+                <Text style={styles.label}>Date</Text>
+                <View style={styles.quickDatesRow}>
+                  <TouchableOpacity
+                    style={[
+                      styles.quickBtn,
+                      quickDate === 'today' && styles.selectedTurq,
+                    ]}
+                    onPress={() => {
+                      setDateObj(new Date());
+                      setQuickDate('today');
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.quickText,
+                        quickDate === 'today' && styles.selectedTextDark,
+                      ]}
+                    >
+                      aujourd&apos;hui
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.quickBtn,
+                      quickDate === 'yesterday' && styles.selectedTurq,
+                    ]}
+                    onPress={() => {
+                      const d = new Date();
+                      d.setDate(d.getDate() - 1);
+                      setDateObj(d);
+                      setQuickDate('yesterday');
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.quickText,
+                        quickDate === 'yesterday' && styles.selectedTextDark,
+                      ]}
+                    >
+                      hier
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.quickBtn,
+                      quickDate === 'calendar' && styles.selectedTurq,
+                    ]}
+                    onPress={() => {
+                      setTxDateModal(true);
+                      setQuickDate('calendar');
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.quickText,
+                        quickDate === 'calendar' && styles.selectedTextDark,
+                      ]}
+                    >
+                      Calendrier
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.dateDisplay}>
+                  <Text style={styles.dateDisplayText}>
+                    {dateObj.toLocaleDateString('fr-FR')}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.txBlock}>
+                {/* Balises : tap = select/deselect, X = supprimer définitivement */}
+                <Text style={styles.label}>Balises</Text>
+                <View style={styles.tagsRow}>
+                  <TextInput
+                    placeholder="Ajouter une balise (ex: Hôtel, GeoWay.)"
+                    placeholderTextColor={C.textMut}
+                    value={tagInput}
+                    onChangeText={setTagInput}
+                    style={[styles.input, { flex: 1 }]}
+                  />
+                  <TouchableOpacity
+                    style={[styles.smallAction, styles.selectedTurq]}
+                    onPress={() => {
+                      const val = tagInput.trim();
+                      if (!val) return;
+                      if (!knownTags.includes(val))
+                        setKnownTags((prev) => [...prev, val]);
+                      if (!tags.includes(val))
+                        setTags((prev) => [...prev, val]);
+                      setTagInput('');
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.smallActionText,
+                        styles.selectedTextDark,
+                      ]}
+                    >
+                      Ajouter
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.chipsRow}>
+                  {knownTags.map((t) => {
+                    const active = tags.includes(t);
+                    return (
+                      <View
+                        key={t}
+                        style={[styles.chip, active && styles.selectedTurq]}
+                      >
+                        <TouchableOpacity
+                          onPress={() =>
+                            setTags((prev) =>
+                              active
+                                ? prev.filter((x) => x !== t)
+                                : [...prev, t],
+                            )
+                          }
+                          style={{ paddingHorizontal: 4, paddingVertical: 2 }}
+                        >
+                          <Text
+                            style={[
+                              styles.chipText,
+                              active && styles.selectedTextDark,
+                            ]}
+                          >
+                            {t}
+                          </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => {
+                            Alert.alert(
+                              'Supprimer la balise ?',
+                              `"${t}" sera supprimée de la liste.`,
+                              [
+                                { text: 'Annuler', style: 'cancel' },
                                 {
                                   text: 'Supprimer',
+                                  style: 'destructive',
                                   onPress: () => {
                                     setKnownTags((prev) =>
                                       prev.filter((x) => x !== t),
                                     );
-                                    setTags((prev) =>
-                                      prev.filter((x) => x !== t),
-                                    );
-                                  },
-                                },
-                              ],
-                            });
                                     setTags((prev) =>
                                       prev.filter((x) => x !== t),
                                     );
@@ -602,7 +1489,7 @@ export default function FinanceScreen() {
                       key={i}
                       style={styles.photoSlot}
                       onPress={() =>
-                        appAlert.show('Photo', "S�lection d'image (placeholder).")
+                        Alert.alert('Photo', "Sélection d'image (placeholder).")
                       }
                     >
                       <Text style={{ color: C.textMut, fontSize: 22 }}>+</Text>
@@ -802,7 +1689,7 @@ export default function FinanceScreen() {
               </View>
 
               <ScrollView style={{ maxHeight: 180, marginTop: 8 }}>
-                {categories.map((c) => (
+                {categories.filter((c) => c.side === catDraft.side).map((c) => (
                   <TouchableOpacity
                     key={c.id}
                     style={styles.catManageRow}
