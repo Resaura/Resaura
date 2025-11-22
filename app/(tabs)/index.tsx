@@ -1,6 +1,6 @@
 ﻿// app/(tabs)/bookings.tsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, Pressable, TextInput, Modal, Platform, Share, LayoutAnimation, UIManager, KeyboardAvoidingView, ScrollView, Linking, ActivityIndicator, PermissionsAndroid, Alert } from 'react-native';
+import { View, Text, StyleSheet, FlatList, Pressable, TextInput, Modal, Platform, Share, LayoutAnimation, UIManager, KeyboardAvoidingView, ScrollView, Linking, ActivityIndicator, PermissionsAndroid } from 'react-native';
 import type { TextInputProps } from 'react-native';
 import { Phone, Share2, Edit3, MapPin, RotateCcw, Star, LocateFixed, Clock3, Plane, TrainFront, Baby, Users, Luggage, ChevronRight } from 'lucide-react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -189,16 +189,14 @@ export default function BookingsScreen() {
     (first: string, last: string) =>
       new Promise<boolean>((resolve) => {
         const displayName = `${first || ''} ${last || ''}`.trim() || 'ce client';
-        Alert.alert(
-          'Ajouter au portefeuille ?',
-          `Ajouter ${displayName} au portefeuille clients ?`,
-          [
-            { text: 'Non', style: 'cancel', onPress: () => resolve(false) },
+        alert.show('Ajouter au portefeuille ?', `Ajouter ${displayName} au portefeuille clients ?`, {
+          actions: [
+            { text: 'Non', variant: 'ghost', onPress: () => resolve(false) },
             { text: 'Oui', onPress: () => resolve(true) },
           ],
-        );
+        });
       }),
-    [],
+    [alert],
   );
 
   useEffect(() => {
@@ -574,6 +572,12 @@ export default function BookingsScreen() {
         item.pickup ? `Départ : ${item.pickup}` : null,
         ...stops.map((stop, index) => `Étape ${index + 1} : ${stop}`),
         arrival ? `Arrivée : ${arrival}` : null,
+        item.phone ? `Téléphone : ${item.phone}` : null,
+        typeof item.passengers === 'number' ? `Passagers : ${item.passengers}` : null,
+        typeof item.luggage === 'number' ? `Bagages : ${item.luggage}` : null,
+        item.child_seat ? 'Siège bébé : Oui' : null,
+        item.flight_no?.trim() ? `Vol : ${item.flight_no.trim()}` : null,
+        item.train_no?.trim() ? `Train : ${item.train_no.trim()}` : null,
         item.note_client?.trim() ? `Commentaire : ${item.note_client.trim()}` : null,
       ].filter(Boolean) as string[];
       await Share.share({ message: lines.join('\n') });
