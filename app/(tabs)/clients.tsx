@@ -111,7 +111,7 @@ export default function ClientsScreen() {
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [filters, setFilters] = useState<ClientListFilters>({
-    recents: true,
+    recents: false,
     frequent: false,
     notes: false,
     vip: false,
@@ -822,7 +822,7 @@ const styles = StyleSheet.create({
   sortChipTextActive: { color: COLORS.text, fontWeight: '700' },
   sortHint: { color: COLORS.textMuted, fontSize: 12, marginBottom: 16 },
   card: {
-    backgroundColor: COLORS.inputBg,
+    backgroundColor: COLORS.backgroundDeep,
     borderRadius: RADII.card,
     padding: 16,
     borderWidth: 1,
@@ -886,8 +886,6 @@ const styles = StyleSheet.create({
   },
   retryText: { color: COLORS.azure, fontWeight: '700' },
 });
-
-
 
 
 

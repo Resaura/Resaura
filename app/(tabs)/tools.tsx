@@ -625,7 +625,7 @@ const styles = StyleSheet.create({
   },
 
   statusCard: {
-    backgroundColor: COLORS.inputBg,
+    backgroundColor: COLORS.backgroundDeep,
     borderRadius: RADII.card,
     padding: 16,
     flexDirection: 'row',
@@ -673,7 +673,7 @@ const styles = StyleSheet.create({
   },
 
   toolCard: {
-    backgroundColor: COLORS.inputBg,
+    backgroundColor: COLORS.backgroundDeep,
     borderRadius: RADII.card,
     padding: 16,
     flexDirection: 'row',
@@ -788,7 +788,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   noteCard: {
-    backgroundColor: COLORS.inputBg,
+    backgroundColor: COLORS.backgroundDeep,
     borderRadius: RADII.card,
     padding: 16,
     marginBottom: 12,

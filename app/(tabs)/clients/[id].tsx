@@ -547,7 +547,7 @@ const styles = StyleSheet.create({
   },
   headerActionText: { color: COLORS.darkText, fontWeight: '700' },
   section: {
-    backgroundColor: COLORS.inputBg,
+    backgroundColor: COLORS.backgroundDeep,
     borderRadius: RADII.card,
     padding: 16,
     borderWidth: 1,
@@ -574,6 +574,7 @@ const styles = StyleSheet.create({
     borderColor: COLORS.inputBorder,
     padding: 12,
     marginTop: 10,
+    backgroundColor: COLORS.backgroundDeep,
   },
   historyDate: { color: COLORS.text, fontWeight: '700' },
   historyText: { color: COLORS.text, marginTop: 4 },
@@ -630,4 +631,3 @@ const styles = StyleSheet.create({
   },
   blacklistText: { color: COLORS.darkText, fontWeight: '700' },
 });
-
