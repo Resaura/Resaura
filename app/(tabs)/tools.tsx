@@ -1,5 +1,5 @@
 // app/(tabs)/tools.tsx
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Power, Pause, Clock, FileText, Plus, X, Edit, Trash2, Send, Calculator } from 'lucide-react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useAppAlert } from '@/contexts/AlertContext';
@@ -26,6 +27,9 @@ import {
 import { getSmsShortcuts, saveSmsShortcuts, type SmsShortcut } from '@/lib/smsShortcuts';
 import { useSwipeTabsNavigation } from '@/hooks/useSwipeTabsNavigation';
 import TvaCalculator from '@/components/tools/TvaCalculator';
+
+const TOOLS_ORDER_KEY = 'tools_quick_order_v1';
+const DEFAULT_TOOL_ORDER = ['notes', 'review', 'sms', 'tva'] as const;
 
 interface Note {
   id: string;
@@ -53,7 +57,9 @@ export default function ToolsScreen() {
   const [smsModalVisible, setSmsModalVisible] = useState(false);
   const [smsShortcutsState, setSmsShortcutsState] = useState<SmsShortcut[]>([]);
   const [smsDrafts, setSmsDrafts] = useState<Record<string, string>>({});
+  const [smsLabelDrafts, setSmsLabelDrafts] = useState<Record<string, string>>({});
   const [tvaCalculatorVisible, setTvaCalculatorVisible] = useState(false);
+  const [toolOrder, setToolOrder] = useState<string[]>([...DEFAULT_TOOL_ORDER]);
 
   const { user } = useAuth();
   const alert = useAppAlert();
@@ -67,8 +73,46 @@ export default function ToolsScreen() {
       void loadNotes();
       void loadReviewMessage();
       void loadSmsSettings();
+      void loadToolOrder();
     }
   }, [user]);
+
+  const loadToolOrder = async () => {
+    try {
+      const raw = await AsyncStorage.getItem(TOOLS_ORDER_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as string[];
+      const allowed = new Set(DEFAULT_TOOL_ORDER);
+      const filtered = parsed.filter((id) => allowed.has(id as typeof DEFAULT_TOOL_ORDER[number]));
+      const missing = DEFAULT_TOOL_ORDER.filter((id) => !filtered.includes(id));
+      setToolOrder([...filtered, ...missing]);
+    } catch {
+      // fallback on default order silently
+    }
+  };
+
+  const persistToolOrder = async (order: string[]) => {
+    setToolOrder(order);
+    try {
+      await AsyncStorage.setItem(TOOLS_ORDER_KEY, JSON.stringify(order));
+    } catch {
+      // silencieux
+    }
+  };
+
+  const moveTool = (id: string, direction: 'up' | 'down') => {
+    setToolOrder((prev) => {
+      const idx = prev.indexOf(id);
+      if (idx === -1) return prev;
+      if (direction === 'up' && idx === 0) return prev;
+      if (direction === 'down' && idx === prev.length - 1) return prev;
+      const next = [...prev];
+      const target = direction === 'up' ? idx - 1 : idx + 1;
+      [next[idx], next[target]] = [next[target], next[idx]];
+      void persistToolOrder(next);
+      return next;
+    });
+  };
 
   // ---------- Loaders ----------
   const loadNotes = async () => {
@@ -92,6 +136,7 @@ export default function ToolsScreen() {
       const shortcuts = await getSmsShortcuts();
       setSmsShortcutsState(shortcuts);
       setSmsDrafts(Object.fromEntries(shortcuts.map((item) => [item.id, item.body])));
+      setSmsLabelDrafts(Object.fromEntries(shortcuts.map((item) => [item.id, item.label])));
     } catch (e: any) {
       console.warn('[tools] loadSmsSettings error:', e?.message);
       alert.show('Erreur', "Impossible de charger les raccourcis SMS.");
@@ -128,6 +173,7 @@ export default function ToolsScreen() {
   // ---------- Raccourcis SMS ----------
   const openSmsModal = () => {
     setSmsDrafts(Object.fromEntries(smsShortcutsState.map((item) => [item.id, item.body])));
+    setSmsLabelDrafts(Object.fromEntries(smsShortcutsState.map((item) => [item.id, item.label])));
     setSmsModalVisible(true);
   };
 
@@ -136,6 +182,7 @@ export default function ToolsScreen() {
       const payload = smsShortcutsState.map((item) => ({
         ...item,
         body: smsDrafts[item.id] ?? item.body,
+        label: smsLabelDrafts[item.id] ?? item.label,
       }));
       await saveSmsShortcuts(payload);
       setSmsShortcutsState(payload);
@@ -144,6 +191,20 @@ export default function ToolsScreen() {
     } catch (e: any) {
       alert.show('Erreur', "Impossible d’enregistrer les raccourcis.");
     }
+  };
+
+
+  const addSmsShortcut = () => {
+    const id = `custom-${Date.now()}`;
+    const next = {
+      id,
+      label: 'Nouveau message',
+      body: '',
+      channel: 'sms',
+    } as const;
+    setSmsShortcutsState((prev) => [...prev, next]);
+    setSmsDrafts((prev) => ({ ...prev, [id]: '' }));
+    setSmsLabelDrafts((prev) => ({ ...prev, [id]: next.label }));
   };
 
   // ---------- Bloc-notes ----------
@@ -215,6 +276,46 @@ export default function ToolsScreen() {
     busy: { label: 'Occupé', dot: '#EF4444', iconColor: '#EF4444' },
     pause: { label: 'En pause', dot: '#F59E0B', iconColor: '#F59E0B' },
   };
+
+  const toolItems = useMemo(
+    () => ({
+      notes: {
+        id: 'notes',
+        title: 'Bloc-notes',
+        description: `Prenez des notes rapides (${notes.length} note${notes.length > 1 ? 's' : ''})`,
+        icon: FileText,
+        onPress: () => setNotesModalVisible(true),
+      },
+      review: {
+        id: 'review',
+        title: 'Avis Google',
+        description: `Message actuel : ${googleReviewMessage.slice(0, 80)}${
+          googleReviewMessage.length > 80 ? '…' : ''
+        }`,
+        icon: Clock,
+        onPress: openReviewModal,
+      },
+      sms: {
+        id: 'sms',
+        title: 'Raccourcis SMS',
+        description: 'Configurez vos messages (arrivǸe, suivi, avis) rǸutilisǸs partout.',
+        icon: Send,
+        onPress: openSmsModal,
+      },
+      tva: {
+        id: 'tva',
+        title: 'Calculatrice TVA',
+        description: 'Convertissez rapidement vos montants HT/TTC avec les taux fran��ais.',
+        icon: Calculator,
+        onPress: () => setTvaCalculatorVisible(true),
+      },
+    }),
+    [googleReviewMessage, notes.length],
+  );
+
+  const orderedTools = toolOrder
+    .map((id) => toolItems[id as keyof typeof toolItems])
+    .filter((item): item is (typeof toolItems)[keyof typeof toolItems] => Boolean(item));
 
   return (
     <View {...swipeHandlers} style={[styles.container, { paddingBottom: safeBottom }]}>
@@ -304,77 +405,49 @@ export default function ToolsScreen() {
           </View>
         </View>
 
-        {/* Accès rapide */}
+        {/* Acc??s rapide */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Accès rapide</Text>
 
-          <TouchableOpacity
-            style={styles.toolCard}
-            onPress={() => setNotesModalVisible(true)}
-            accessibilityRole="button"
-            accessibilityLabel="Ouvrir le bloc-notes"
-          >
-            <View style={styles.toolIconContainer}>
-              <FileText size={28} color={COLORS.background} strokeWidth={2} />
-            </View>
-            <View style={styles.toolContent}>
-              <Text style={styles.toolTitle}>Bloc-notes</Text>
-              <Text style={styles.toolDescription}>
-                Prenez des notes rapides ({notes.length} note{notes.length > 1 ? 's' : ''})
-              </Text>
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.toolCard}
-            onPress={openReviewModal}
-            accessibilityRole="button"
-            accessibilityLabel="Configurer le message Avis Google"
-          >
-            <View style={styles.toolIconContainer}>
-              <Clock size={28} color={COLORS.background} strokeWidth={2} />
-            </View>
-            <View style={styles.toolContent}>
-              <Text style={styles.toolTitle}>Avis Google</Text>
-              <Text style={styles.toolDescription} numberOfLines={2}>
-                Message actuel : {googleReviewMessage.slice(0, 80)}
-                {googleReviewMessage.length > 80 ? '…' : ''}
-              </Text>
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.toolCard}
-            onPress={openSmsModal}
-            accessibilityRole="button"
-            accessibilityLabel="Configurer les raccourcis SMS"
-          >
-            <View style={styles.toolIconContainer}>
-              <Send size={28} color={COLORS.background} strokeWidth={2} />
-            </View>
-            <View style={styles.toolContent}>
-              <Text style={styles.toolTitle}>Raccourcis SMS</Text>
-              <Text style={styles.toolDescription}>
-                Configurez vos messages (arrivée, suivi, avis) réutilisés partout.
-              </Text>
-            </View>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.toolCard}
-            onPress={() => setTvaCalculatorVisible(true)}
-            accessibilityRole="button"
-            accessibilityLabel="Ouvrir la calculatrice TVA"
-          >
-            <View style={styles.toolIconContainer}>
-              <Calculator size={28} color={COLORS.background} strokeWidth={2} />
-            </View>
-            <View style={styles.toolContent}>
-              <Text style={styles.toolTitle}>Calculatrice TVA</Text>
-              <Text style={styles.toolDescription}>
-                Convertissez rapidement vos montants HT/TTC avec les taux français.
-              </Text>
-            </View>
-          </TouchableOpacity>
+          {orderedTools.map((tool, index) => {
+            const Icon = tool.icon;
+            return (
+              <View key={tool.id} style={styles.toolCard}>
+                <TouchableOpacity
+                  style={styles.toolCardContent}
+                  onPress={tool.onPress}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Ouvrir ${tool.title}`}
+                >
+                  <View style={styles.toolIconContainer}>
+                    <Icon size={28} color={COLORS.background} strokeWidth={2} />
+                  </View>
+                  <View style={styles.toolContent}>
+                    <Text style={styles.toolTitle}>{tool.title}</Text>
+                    <Text style={styles.toolDescription} numberOfLines={2}>
+                      {tool.description}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+                <View style={styles.reorderRow}>
+                  <TouchableOpacity
+                    style={[styles.reorderBtn, index === 0 && styles.reorderBtnDisabled]}
+                    onPress={() => moveTool(tool.id, 'up')}
+                    disabled={index === 0}
+                  >
+                    <Text style={styles.reorderText}>Monter</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.reorderBtn, index === orderedTools.length - 1 && styles.reorderBtnDisabled]}
+                    onPress={() => moveTool(tool.id, 'down')}
+                    disabled={index === orderedTools.length - 1}
+                  >
+                    <Text style={styles.reorderText}>Descendre</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            );
+          })}
         </View>
       </ScrollView>
 
@@ -540,9 +613,21 @@ export default function ToolsScreen() {
           </View>
 
           <ScrollView style={styles.modalContent} keyboardShouldPersistTaps="handled">
+            <TouchableOpacity style={styles.addSmsButton} onPress={addSmsShortcut}>
+              <Plus size={18} color={COLORS.background} strokeWidth={2} />
+              <Text style={styles.addSmsButtonText}>Ajouter un message</Text>
+            </TouchableOpacity>
             {smsShortcutsState.map((shortcut) => (
               <View key={shortcut.id} style={styles.noteForm}>
-                <Text style={styles.label}>{shortcut.label}</Text>
+                <TextInput
+                  style={[styles.input, { marginBottom: 8 }]}
+                  value={smsLabelDrafts[shortcut.id] ?? shortcut.label}
+                  onChangeText={(text) =>
+                    setSmsLabelDrafts((prev) => ({ ...prev, [shortcut.id]: text }))
+                  }
+                  placeholder="Nom du message"
+                  placeholderTextColor={COLORS.textMuted}
+                />
                 <TextInput
                   style={[styles.input, styles.textArea]}
                   multiline
@@ -684,6 +769,12 @@ const styles = StyleSheet.create({
     borderColor: COLORS.inputBorder,
     ...SHADOW.card,
   },
+  toolCardContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    flex: 1,
+  },
   toolIconContainer: {
     width: 48,
     height: 48,
@@ -704,6 +795,27 @@ const styles = StyleSheet.create({
   toolDescription: {
     fontSize: 13,
     color: COLORS.textMuted,
+  },
+  reorderRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
+    marginTop: 10,
+  },
+  reorderBtn: {
+    borderRadius: RADII.button,
+    borderWidth: 1,
+    borderColor: COLORS.inputBorder,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  reorderBtnDisabled: {
+    opacity: 0.45,
+  },
+  reorderText: {
+    color: COLORS.text,
+    fontWeight: '700',
+    fontSize: 12,
   },
 
   /* Modales */
@@ -729,6 +841,20 @@ const styles = StyleSheet.create({
   modalContent: {
     flex: 1,
     padding: 20,
+  },
+  addSmsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: COLORS.azure,
+    borderRadius: RADII.button,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    marginBottom: 16,
+  },
+  addSmsButtonText: {
+    color: COLORS.background,
+    fontWeight: '800',
   },
 
   /* Formulaires */
@@ -831,3 +957,4 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
   },
 });
+

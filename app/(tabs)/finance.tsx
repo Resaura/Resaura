@@ -24,6 +24,7 @@ import { useSwipeTabsNavigation } from '@/hooks/useSwipeTabsNavigation';
 import { COLORS, RADII, SHADOW } from '@/lib/theme';
 import FloatingActionButton from '@/components/ui/FloatingActionButton';
 import TvaCalculator from '@/components/tools/TvaCalculator';
+import { supabase } from '@/lib/supabase';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -107,6 +108,44 @@ const aggregateTotals = (entries: Tx[]) =>
     },
     { ht: 0, ttc: 0 },
   );
+const isUuid = (value: string) =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+const mapTxRow = (row: any): Tx => ({
+  id: String(row.id),
+  side: row.side as Side,
+  amountHT: Number(row.amount_ht ?? 0),
+  tvaRate: Number(row.tva_rate ?? 0),
+  amountTTC: Number(row.amount_ttc ?? 0),
+  categoryId: row.category_id ?? '',
+  dateISO: row.date_iso,
+  tags: row.tags ?? [],
+  note: row.note ?? undefined,
+  photos: row.photos ?? [],
+});
+
+const loadUser = async () => {
+  const { data, error } = await supabase.auth.getUser();
+  if (error || !data?.user) throw new Error('Session invalide.');
+  return data.user;
+};
+
+const loadTransactions = async (setTxs: (txs: Tx[]) => void, setLoading: (v: boolean) => void) => {
+  setLoading(true);
+  try {
+    const user = await loadUser();
+    const { data, error } = await supabase
+      .from('finance_transactions')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('date_iso', { ascending: false });
+    if (error) throw error;
+    setTxs((data ?? []).map(mapTxRow));
+    } catch (e) {
+      console.warn('[finance] loadTransactions', e);
+    } finally {
+      setLoading(false);
+    }
+  };
 const computeGoalForPeriod = (
   monthlyGoal: number,
   period: Period,
@@ -376,6 +415,7 @@ export default function FinanceScreen() {
     { id: 'c4', name: 'Carburant', color: '#93C5FD', icon: '⛽', side: 'depense' },
   ]);
   const [txs, setTxs] = useState<Tx[]>([]);
+  const [txsLoading, setTxsLoading] = useState(false);
   const [knownTags, setKnownTags] = useState<string[]>([
     'Perso',
     'Rachid',
@@ -395,6 +435,10 @@ export default function FinanceScreen() {
   const [calcModal, setCalcModal] = useState(false);
   const prevTvaRateRef = useRef<number>(tvaRate);
   const skipTvaSyncRef = useRef(false);
+
+  useEffect(() => {
+    void loadTransactions(setTxs, setTxsLoading);
+  }, []);
 
   const [formSide, setFormSide] = useState<Side>('revenu');
   const [amountMode, setAmountMode] = useState<'HT' | 'TTC'>('TTC');
@@ -489,6 +533,10 @@ export default function FinanceScreen() {
     () => txs.filter((t) => t.side === side && inRange(t.dateISO, fromDate, toDate)),
     [txs, side, fromDate, toDate],
   );
+  const sortedTxs = useMemo(
+    () => [...filteredTxs].sort((a, b) => new Date(b.dateISO).getTime() - new Date(a.dateISO).getTime()),
+    [filteredTxs],
+  );
   const totalsAll = useMemo(() => aggregateTotals(txs), [txs]);
   const totalsCurrent = useMemo(() => aggregateTotals(filteredTxs), [filteredTxs]);
   const displayTotalAll = showTTC ? totalsAll.ttc : totalsAll.ht;
@@ -508,6 +556,11 @@ export default function FinanceScreen() {
     }
     return Object.values(map).sort((a, b) => b.sumTTC - a.sumTTC);
   }, [filteredTxs, categories]);
+  const catById = useMemo(() => {
+    const m = new Map<string, Category>();
+    categories.forEach((c) => m.set(c.id, c));
+    return m;
+  }, [categories]);
   const currentGoalConfig = side === 'revenu' ? goalRevenue : goalExpense;
   const currentGoalMonthly = showTTC ? currentGoalConfig.ttc : currentGoalConfig.ht;
   const periodGoalValue = useMemo(
@@ -622,46 +675,75 @@ export default function FinanceScreen() {
   };
 
   /* ----- Add transaction ----- */
-  const addTx = () => {
+  const addTx = async () => {
     const v = parseAmountInput();
     if (!v || !chosenCat) {
-      Alert.alert('Erreur', 'Montant et cat?gorie requis.');
+      Alert.alert('Erreur', 'Montant et catégorie requis.');
       return;
     }
     const amountHT = amountHTValue;
     const amountTTC = amountTTCValue;
-    const tx: Tx = {
-      id: Date.now().toString(),
-      side: formSide,
-      amountHT,
-      tvaRate,
-      amountTTC,
-      categoryId: chosenCat,
-      dateISO: new Date(
-        dateObj.getFullYear(),
-        dateObj.getMonth(),
-        dateObj.getDate(),
-        0,
-        0,
-        0,
-        0,
-      ).toISOString(),
-      tags,
-      note,
-      photos: photoPlaceholders,
-    };
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setTxs((p) => [tx, ...p]);
-    tags.forEach((t) => {
-      if (!knownTags.includes(t)) setKnownTags((prev) => [...prev, t]);
-    });
+    const dateISO = new Date(
+      dateObj.getFullYear(),
+      dateObj.getMonth(),
+      dateObj.getDate(),
+      0,
+      0,
+      0,
+      0,
+    ).toISOString();
+    const categoryId = isUuid(chosenCat) ? chosenCat : null;
 
-    setAmountInput('');
-    setChosenCat('');
-    setNote('');
-    setTags([]);
-    setPhotoPlaceholders([]);
-    setAddModal(false);
+    try {
+      const user = await loadUser();
+      const { data: inserted, error } = await supabase
+        .from('finance_transactions')
+        .insert({
+          user_id: user.id,
+          side: formSide,
+          amount_ht: amountHT,
+          tva_rate: tvaRate,
+          amount_ttc: amountTTC,
+          category_id: categoryId,
+          date_iso: dateISO,
+          tags,
+          note: note?.trim() || null,
+          photos: photoPlaceholders,
+        })
+        .select('id')
+        .single();
+      if (error) {
+        Alert.alert('Erreur', error.message || "Impossible d'enregistrer la transaction.");
+        return;
+      }
+
+      const tx: Tx = {
+        id: inserted?.id ?? Date.now().toString(),
+        side: formSide,
+        amountHT,
+        tvaRate,
+        amountTTC,
+        categoryId: chosenCat,
+        dateISO,
+        tags,
+        note,
+        photos: photoPlaceholders,
+      };
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      setTxs((p) => [tx, ...p]);
+      tags.forEach((t) => {
+        if (!knownTags.includes(t)) setKnownTags((prev) => [...prev, t]);
+      });
+
+      setAmountInput('');
+      setChosenCat('');
+      setNote('');
+      setTags([]);
+      setPhotoPlaceholders([]);
+      setAddModal(false);
+    } catch (e: any) {
+      Alert.alert('Erreur', e?.message || "Impossible d'enregistrer la transaction.");
+    }
   };
 
   /* ----- Category CRUD ----- */
@@ -1046,6 +1128,43 @@ export default function FinanceScreen() {
             Aucune transaction dans cette période.
           </Text>
         )}
+
+        <View style={{ marginTop: 16 }}>
+          <Text style={styles.sectionTitle}>Transactions</Text>
+          {txsLoading && (
+            <Text style={{ color: C.textMut, marginTop: 8 }}>Chargement...</Text>
+          )}
+          {!txsLoading && sortedTxs.length === 0 && (
+            <Text style={{ color: C.textMut, marginTop: 8 }}>Aucune transaction.</Text>
+          )}
+          {!txsLoading &&
+            sortedTxs.slice(0, 50).map((tx) => {
+              const cat = catById.get(tx.categoryId);
+              const amount = showTTC ? tx.amountTTC : tx.amountHT;
+              return (
+                <View key={tx.id} style={styles.txRow}>
+                  <View
+                    style={[
+                      styles.txIcon,
+                      { backgroundColor: `${cat?.color ?? C.card2}33` },
+                    ]}
+                  >
+                    <Text style={styles.txIconText}>{cat?.icon ?? '💸'}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.txTitle} numberOfLines={1}>
+                      {cat?.name ?? 'Sans catégorie'}
+                    </Text>
+                    <Text style={styles.txMeta} numberOfLines={1}>
+                      {new Date(tx.dateISO).toLocaleDateString('fr-FR')}
+                      {tx.note ? ` · ${tx.note}` : ''}
+                    </Text>
+                  </View>
+                  <Text style={styles.txAmount}>{fmtEuros(amount)}</Text>
+                </View>
+              );
+            })}
+        </View>
       </ScrollView>
 
       <FloatingActionButton
@@ -1940,6 +2059,29 @@ const styles = StyleSheet.create({
   catName: { color: C.text, fontWeight: '700' },
   catPct: { color: C.textMut, fontSize: 12 },
   catAmount: { color: C.text, fontWeight: '800' },
+
+  txRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: C.card,
+    borderRadius: RADII.card,
+    padding: 12,
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: C.card2,
+  },
+  txIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  txIconText: { color: C.text, fontSize: 18 },
+  txTitle: { color: C.text, fontWeight: '700' },
+  txMeta: { color: C.textMut, fontSize: 12, marginTop: 2 },
+  txAmount: { color: C.text, fontWeight: '800' },
 
   modalOverlay: {
     flex: 1,
