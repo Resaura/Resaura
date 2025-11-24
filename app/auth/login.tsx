@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -24,10 +24,17 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const { signIn, rememberMe, setRememberMe } = useAuth();
+  const { signIn, rememberMe, setRememberMe, session, loading: authLoading } = useAuth();
   const alert = useAppAlert();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+
+  useEffect(() => {
+    if (!authLoading && session) {
+      router.replace('/(tabs)');
+      setLoading(false);
+    }
+  }, [authLoading, session, router]);
 
   const handleLogin = async () => {
     if (!email || !password) {
@@ -64,79 +71,89 @@ export default function LoginScreen() {
   };
 
   return (
-    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={0}
+    >
       <StatusBar barStyle="light-content" />
-      <ScrollView
-        contentContainerStyle={[styles.scroll, { paddingBottom: Math.max(24, insets.bottom + 32) }]}
-        keyboardShouldPersistTaps="handled"
-      >
-        <View style={styles.header}>
-          <Image
-            source={require('../../assets/icon.png')}
-            style={styles.logo}
-            resizeMode="contain"
-            accessibilityLabel="Logo Resaura"
-          />
-          <Text style={styles.slogan}>Tout commence par une réservation</Text>
-        </View>
-
-        <View style={styles.form}>
-          <FormInput
-            label="Email"
-            placeholder="votre@email.com"
-            value={email}
-            onChangeText={setEmail}
-            keyboardType="email-address"
-            autoCapitalize="none"
-            autoComplete="email"
-            textContentType="username"
-            editable={!loading}
-            returnKeyType="next"
-          />
-
-          <View style={{ height: 12 }} />
-
-          <FormInput.Password
-            label="Mot de passe"
-            placeholder="••••••••"
-            value={password}
-            onChangeText={setPassword}
-            editable={!loading}
-            returnKeyType="send"
-            onSubmitEditing={handleLogin}
-          />
-
-          <View style={styles.rowBetween}>
-            <FormCheckbox checked={rememberMe} onChange={setRememberMe} label="Rester connecté" />
-            <Text style={styles.linkText} onPress={() => router.push('/auth/forgot-password')}>
-              Mot de passe oublié ?
-            </Text>
+      <View style={styles.flexBg}>
+        <ScrollView
+          style={styles.scrollBg}
+          contentContainerStyle={[styles.scroll, { paddingBottom: Math.max(24, insets.bottom + 32) }]}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+        >
+          <View style={styles.header}>
+            <Image
+              source={require('../../assets/icon.png')}
+              style={styles.logo}
+              resizeMode="contain"
+              accessibilityLabel="Logo Resaura"
+            />
+            <Text style={styles.slogan}>Tout commence par une réservation</Text>
           </View>
 
-          <FormButton
-            title={loading ? 'Connexion…' : 'Se connecter'}
-            onPress={handleLogin}
-            loading={loading}
-            disabled={loading}
-          />
+          <View style={styles.form}>
+            <FormInput
+              label="Email"
+              placeholder="votre@email.com"
+              value={email}
+              onChangeText={setEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoComplete="email"
+              textContentType="username"
+              editable={!loading}
+              returnKeyType="next"
+            />
 
-          <View style={{ height: 12 }} />
+            <View style={{ height: 12 }} />
 
-          <View style={styles.rowCenter}>
-            <Text style={styles.muted}>Pas encore de compte ? </Text>
-            <Text style={styles.linkText} onPress={() => router.push('/auth/signup')}>
-              Créer un compte
-            </Text>
+            <FormInput.Password
+              label="Mot de passe"
+              placeholder="••••••••"
+              value={password}
+              onChangeText={setPassword}
+              editable={!loading}
+              returnKeyType="send"
+              onSubmitEditing={handleLogin}
+            />
+
+            <View style={styles.rowBetween}>
+              <FormCheckbox checked={rememberMe} onChange={setRememberMe} label="Rester connecté" />
+              <Text style={styles.linkText} onPress={() => router.push('/auth/forgot-password')}>
+                Mot de passe oublié ?
+              </Text>
+            </View>
+
+            <FormButton
+              title={loading ? 'Connexion…' : 'Se connecter'}
+              onPress={handleLogin}
+              loading={loading}
+              disabled={loading}
+            />
+
+            <View style={{ height: 12 }} />
+
+            <View style={styles.rowCenter}>
+              <Text style={styles.muted}>Pas encore de compte ? </Text>
+              <Text style={styles.linkText} onPress={() => router.push('/auth/signup')}>
+                Créer un compte
+              </Text>
+            </View>
           </View>
-        </View>
-      </ScrollView>
+        </ScrollView>
+      </View>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
-  scroll: { flexGrow: 1, padding: 24, paddingTop: 48, minHeight: '100%' },
+  flexBg: { flex: 1, backgroundColor: COLORS.background },
+  scrollBg: { flex: 1, backgroundColor: COLORS.background },
+  scroll: { flexGrow: 1, padding: 24, paddingTop: 48, minHeight: '100%', backgroundColor: COLORS.background },
   header: { alignItems: 'center', marginBottom: 24, gap: 10 },
   logo: { width: 200, height: 200, borderRadius: RADII.button },
   slogan: { color: COLORS.azure, fontSize: 14, fontWeight: '800', textAlign: 'center' },
