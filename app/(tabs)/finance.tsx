@@ -415,7 +415,7 @@ export default function FinanceScreen() {
   const [rangeEnd, setRangeEnd] = useState<Date | null>(null);
   const [rangeModal, setRangeModal] = useState(false);
   const [txDateModal, setTxDateModal] = useState(false);
-  const [showChartAsProgress, setShowChartAsProgress] = useState(false);
+  const [showChartAsProgress] = useState(true);
   const [goalRevenue, setGoalRevenue] = useState<{ ht: number; ttc: number }>({ ht: 1000, ttc: 1000 });
   const [goalExpense, setGoalExpense] = useState<{ ht: number; ttc: number }>({ ht: 500, ttc: 500 });
   const [showTTC, setShowTTC] = useState<boolean>(true);
@@ -429,12 +429,8 @@ export default function FinanceScreen() {
   // swipe vertical doux sur la carte pour basculer graphe <-> objectif (éviter de bloquer le scroll)
   const panResponder = useRef(
     PanResponder.create({
-      onMoveShouldSetPanResponder: (_evt, g) =>
-        Math.abs(g.dy) > Math.abs(g.dx) * 1.5 && Math.abs(g.dy) > 36,
-      onPanResponderRelease: (_evt, g) => {
-        if (g.dy < -20) setShowChartAsProgress(true); // swipe up => objectif
-        if (g.dy > 20) setShowChartAsProgress(false); // swipe down => répartition
-      },
+      onMoveShouldSetPanResponder: () => false,
+      onPanResponderRelease: () => {},
     }),
   ).current;
 
@@ -1081,57 +1077,45 @@ export default function FinanceScreen() {
           <Text style={styles.chartTitle}>
             {side === 'revenu' ? 'Revenus' : 'Dépenses'} - {fmtEuros(displayTotalCurrent)}
           </Text>
-          <TouchableOpacity onPress={() => setShowChartAsProgress((v) => !v)}>
-            <Text style={styles.chartToggle}>
-              {showChartAsProgress ? 'Afficher répartition' : 'Afficher objectif'}
-            </Text>
-          </TouchableOpacity>
+          <View style={{ alignItems: 'flex-end' }}>
+            <Text style={styles.goalLabel}>Objectif</Text>
+            <TouchableOpacity style={styles.goalEditBtn} onPress={openGoalEditModal}>
+              <Text style={styles.goalEditBtnText}>Modifier</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
-        {showChartAsProgress ? (
-          <View style={styles.goalWrap}>
-            <View style={styles.goalHeader}>
-              <View style={styles.goalHeaderInfo}>
-                <Target size={18} color={C.accent2} />
-                <Text style={styles.goalLabel}>
-                  Objectif {side === 'revenu' ? 'revenus' : 'dépenses'}
-                </Text>
-              </View>
-              <TouchableOpacity style={styles.goalEditBtn} onPress={openGoalEditModal}>
-                <Text style={styles.goalEditBtnText}>Modifier</Text>
-              </TouchableOpacity>
-            </View>
-            <View style={styles.goalBar}>
-              <View
-                style={[
-                  styles.goalFill,
-                  {
-                    width: `${goalProgressPct * 100}%`,
-                  },
-                ]}
+        <View style={styles.goalWrap}>
+          <View style={styles.progressCircleWrap}>
+            <Svg height="180" width="180" viewBox="0 0 200 200">
+              <Circle cx="100" cy="100" r="80" stroke={C.card2} strokeWidth="16" fill="none" />
+              <Circle
+                cx="100"
+                cy="100"
+                r="80"
+                stroke={goalProgressPct >= 1 ? `${C.accent2}CC` : C.accent2}
+                strokeWidth="16"
+                fill="none"
+                strokeDasharray={`${goalProgressPct * 2 * Math.PI * 80} ${(1 - goalProgressPct) * 2 * Math.PI * 80}`}
+                strokeLinecap="round"
+                rotation="-90"
+                originX="100"
+                originY="100"
               />
+            </Svg>
+            <View style={styles.progressInner}>
+              <Text style={styles.totalLabel}>
+                {goalProgressPct >= 1 ? 'Objectif atteint' : 'Progression'}
+              </Text>
+              <Text style={styles.totalValue}>{fmtEuros(displayTotalCurrent)}</Text>
+              <Text style={styles.goalSubText}>sur {fmtEuros(periodGoalValue || 0)}</Text>
             </View>
-            <Text style={styles.goalPct}>
-              {goalRemaining > 0
-                ? `Il reste ${fmtEuros(goalRemaining)} sur ${fmtEuros(periodGoalValue)}`
-                : 'Objectif atteint !'}
-            </Text>
-            <Text style={styles.goalSub}>Objectif mensuel : {fmtEuros(currentGoalMonthly)}</Text>
           </View>
-        ) : (
-          <View style={{ alignItems: 'center', paddingVertical: 8 }}>
-            <Donut
-              value={displayTotalCurrent}
-              total={Math.max(displayTotalCurrent, 1)}
-              size={180}
-              stroke={18}
-              color={C.accent2}
-            />
-            <Text style={{ color: C.textMut, marginTop: 8 }}>
-              Glisse ↑ pour voir l'objectif
-            </Text>
-          </View>
-        )}
+          <Text style={styles.goalPct}>
+            {goalRemaining > 0 ? `Il reste ${fmtEuros(goalRemaining)}` : 'Bravo, objectif atteint !'}
+          </Text>
+          <Text style={styles.goalSub}>Objectif mensuel : {fmtEuros(currentGoalMonthly)}</Text>
+        </View>
       </View>
       {/* HT/TTC switch (sélection = turquoise) */}
       <View style={styles.htttcRow}>
@@ -2067,6 +2051,13 @@ const styles = StyleSheet.create({
   chartToggle: { color: C.accent2, fontWeight: '700' },
 
   goalWrap: { marginTop: 8 },
+  progressCircleWrap: { alignItems: 'center', justifyContent: 'center' },
+  progressInner: {
+    position: 'absolute',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  goalSubText: { color: C.textMut, fontSize: 12, marginTop: 2 },
   goalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   goalHeaderInfo: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   goalEditBtn: {
