@@ -108,6 +108,7 @@ const aggregateTotals = (entries: Tx[]) =>
     },
     { ht: 0, ttc: 0 },
   );
+const GOAL_TVA_FACTOR = 1.1; // conversion HT <-> TTC pour objectif
 const isUuid = (value: string) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 const mapTxRow = (row: any): Tx => ({
@@ -176,6 +177,45 @@ const loadTransactions = async (setTxs: (txs: Tx[]) => void, setLoading: (v: boo
       setLoading(false);
     }
   };
+
+const loadGoals = async (
+  setGoalRevenue: React.Dispatch<React.SetStateAction<{ ht: number; ttc: number }>>,
+  setGoalExpense: React.Dispatch<React.SetStateAction<{ ht: number; ttc: number }>>,
+) => {
+  try {
+    const user = await loadUser();
+    const { data, error } = await supabase
+      .from('finance_goals')
+      .select('revenue_ht, revenue_ttc, expense_ht, expense_ttc')
+      .eq('user_id', user.id)
+      .maybeSingle();
+    if (error) throw error;
+    if (data) {
+      setGoalRevenue({
+        ht: Number(data.revenue_ht ?? 0),
+        ttc: Number(data.revenue_ttc ?? 0),
+      });
+      setGoalExpense({
+        ht: Number(data.expense_ht ?? 0),
+        ttc: Number(data.expense_ttc ?? 0),
+      });
+    }
+  } catch (e) {
+    console.warn('[finance] loadGoals', e);
+  }
+};
+
+const saveGoals = async (userId: string, revenue: { ht: number; ttc: number }, expense: { ht: number; ttc: number }) => {
+  const { error } = await supabase.from('finance_goals').upsert({
+    user_id: userId,
+    revenue_ht: revenue.ht,
+    revenue_ttc: revenue.ttc,
+    expense_ht: expense.ht,
+    expense_ttc: expense.ttc,
+    updated_at: new Date().toISOString(),
+  });
+  if (error) throw error;
+};
 const computeGoalForPeriod = (
   monthlyGoal: number,
   period: Period,
@@ -460,6 +500,7 @@ export default function FinanceScreen() {
   useEffect(() => {
     void loadTransactions(setTxs, setTxsLoading);
     void loadCategories(setCategories, setChosenCat, () => formSide);
+    void loadGoals(setGoalRevenue, setGoalExpense);
   }, []);
 
   const [formSide, setFormSide] = useState<Side>('revenu');
@@ -599,20 +640,32 @@ export default function FinanceScreen() {
     setGoalEditVisible(true);
   };
 
-  const handleGoalEditSave = () => {
+  const handleGoalEditSave = async () => {
     const normalized = goalEditValue.replace(',', '.').trim();
     const parsed = Number.parseFloat(normalized);
     if (!Number.isFinite(parsed) || parsed <= 0) {
       Alert.alert('Montant invalide', 'Merci de saisir un montant mensuel positif.');
       return;
     }
-    const key = goalEditTarget.mode === 'HT' ? 'ht' : 'ttc';
-    if (goalEditTarget.side === 'revenu') {
-      setGoalRevenue((prev) => ({ ...prev, [key]: parsed }));
-    } else {
-      setGoalExpense((prev) => ({ ...prev, [key]: parsed }));
+    const isHT = goalEditTarget.mode === 'HT';
+    const htVal = isHT ? parsed : parsed / GOAL_TVA_FACTOR;
+    const ttcVal = isHT ? parsed * GOAL_TVA_FACTOR : parsed;
+    try {
+      const user = await loadUser();
+      let nextRevenue = goalRevenue;
+      let nextExpense = goalExpense;
+      if (goalEditTarget.side === 'revenu') {
+        nextRevenue = { ht: htVal, ttc: ttcVal };
+        setGoalRevenue(nextRevenue);
+      } else {
+        nextExpense = { ht: htVal, ttc: ttcVal };
+        setGoalExpense(nextExpense);
+      }
+      await saveGoals(user.id, nextRevenue, nextExpense);
+      setGoalEditVisible(false);
+    } catch (e: any) {
+      Alert.alert('Erreur', e?.message || "Impossible d'enregistrer l'objectif.");
     }
-    setGoalEditVisible(false);
   };
 
   /* 75% goal alert */
@@ -1077,26 +1130,23 @@ export default function FinanceScreen() {
           <Text style={styles.chartTitle}>
             {side === 'revenu' ? 'Revenus' : 'Dépenses'} - {fmtEuros(displayTotalCurrent)}
           </Text>
-          <View style={{ alignItems: 'flex-end' }}>
-            <Text style={styles.goalLabel}>Objectif</Text>
-            <TouchableOpacity style={styles.goalEditBtn} onPress={openGoalEditModal}>
-              <Text style={styles.goalEditBtnText}>Modifier</Text>
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity style={styles.goalEditBtn} onPress={openGoalEditModal}>
+            <Text style={styles.goalEditBtnText}>Modifier l'objectif</Text>
+          </TouchableOpacity>
         </View>
 
         <View style={styles.goalWrap}>
           <View style={styles.progressCircleWrap}>
-            <Svg height="180" width="180" viewBox="0 0 200 200">
-              <Circle cx="100" cy="100" r="80" stroke={C.card2} strokeWidth="16" fill="none" />
+            <Svg height="200" width="200" viewBox="0 0 200 200">
+              <Circle cx="100" cy="100" r="88" stroke={C.card2} strokeWidth="16" fill="none" />
               <Circle
                 cx="100"
                 cy="100"
-                r="80"
+                r="88"
                 stroke={goalProgressPct >= 1 ? `${C.accent2}CC` : C.accent2}
                 strokeWidth="16"
                 fill="none"
-                strokeDasharray={`${goalProgressPct * 2 * Math.PI * 80} ${(1 - goalProgressPct) * 2 * Math.PI * 80}`}
+                strokeDasharray={`${goalProgressPct * 2 * Math.PI * 88} ${(1 - goalProgressPct) * 2 * Math.PI * 88}`}
                 strokeLinecap="round"
                 rotation="-90"
                 originX="100"
@@ -2051,6 +2101,7 @@ const styles = StyleSheet.create({
   chartToggle: { color: C.accent2, fontWeight: '700' },
 
   goalWrap: { marginTop: 8 },
+  goalSubText: { color: C.textMut, fontSize: 12, marginTop: 2 },
   progressCircleWrap: { alignItems: 'center', justifyContent: 'center' },
   progressInner: {
     position: 'absolute',
