@@ -129,6 +129,36 @@ const loadUser = async () => {
   return data.user;
 };
 
+const loadCategories = async (
+  setCategories: (cats: Category[]) => void,
+  setChosenCat: (id: string) => void,
+  sideForDefault: () => Side,
+) => {
+  try {
+    const user = await loadUser();
+    const { data, error } = await supabase
+      .from('finance_categories')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('name', { ascending: true });
+    if (error) throw error;
+    const cats =
+      data?.map((row: any) => ({
+        id: String(row.id),
+        name: row.name,
+        color: row.color,
+        icon: row.icon,
+        side: row.side as Side,
+      })) ?? [];
+    setCategories(cats);
+    const firstForSide = cats.find((c) => c.side === sideForDefault());
+    const fallback = firstForSide ?? cats[0];
+    if (fallback) setChosenCat(fallback.id);
+  } catch (e) {
+    console.warn('[finance] loadCategories', e);
+  }
+};
+
 const loadTransactions = async (setTxs: (txs: Tx[]) => void, setLoading: (v: boolean) => void) => {
   setLoading(true);
   try {
@@ -408,12 +438,7 @@ export default function FinanceScreen() {
     }),
   ).current;
 
-  const [categories, setCategories] = useState<Category[]>([
-    { id: 'c1', name: 'Taxi CB', color: '#FDBA74', icon: '💳', side: 'revenu' },
-    { id: 'c2', name: 'Taxi esp', color: '#86EFAC', icon: '💶', side: 'revenu' },
-    { id: 'c3', name: 'Taxi assistance', color: '#FCA5A5', icon: '🆘', side: 'revenu' },
-    { id: 'c4', name: 'Carburant', color: '#93C5FD', icon: '⛽', side: 'depense' },
-  ]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [txs, setTxs] = useState<Tx[]>([]);
   const [txsLoading, setTxsLoading] = useState(false);
   const [knownTags, setKnownTags] = useState<string[]>([
@@ -438,6 +463,7 @@ export default function FinanceScreen() {
 
   useEffect(() => {
     void loadTransactions(setTxs, setTxsLoading);
+    void loadCategories(setCategories, setChosenCat, () => formSide);
   }, []);
 
   const [formSide, setFormSide] = useState<Side>('revenu');
@@ -681,6 +707,10 @@ export default function FinanceScreen() {
       Alert.alert('Erreur', 'Montant et catégorie requis.');
       return;
     }
+    if (!isUuid(chosenCat)) {
+      Alert.alert('Erreur', 'Choisis une catégorie valide.');
+      return;
+    }
     const amountHT = amountHTValue;
     const amountTTC = amountTTCValue;
     const dateISO = new Date(
@@ -747,24 +777,53 @@ export default function FinanceScreen() {
   };
 
   /* ----- Category CRUD ----- */
-  const saveCategory = () => {
+  const saveCategory = async () => {
     if (!catDraft.name.trim()) {
       Alert.alert('Nom requis', 'Donne un nom à la catégorie.');
       return;
     }
-    if (catDraft.id)
-      setCategories((prev) =>
-        prev.map((c) =>
-          c.id === catDraft.id ? ({ ...c, ...catDraft } as Category) : c,
-        ),
-      );
-    else
-      setCategories((prev) => [
-        ...prev,
-        { id: Date.now().toString(), ...catDraft } as Category,
-      ]);
-    setCatDraft({ name: '', color: C.accent1, icon: '💰', side: 'revenu' });
-    setEditCatModal(false);
+    try {
+      const user = await loadUser();
+      if (catDraft.id && isUuid(catDraft.id)) {
+        const { error } = await supabase
+          .from('finance_categories')
+          .update({
+            name: catDraft.name.trim(),
+            color: catDraft.color,
+            icon: catDraft.icon,
+            side: catDraft.side,
+          })
+          .eq('id', catDraft.id)
+          .eq('user_id', user.id);
+        if (error) throw error;
+        setCategories((prev) =>
+          prev.map((c) =>
+            c.id === catDraft.id ? ({ ...c, ...catDraft } as Category) : c,
+          ),
+        );
+      } else {
+        const { data, error } = await supabase
+          .from('finance_categories')
+          .insert({
+            user_id: user.id,
+            name: catDraft.name.trim(),
+            color: catDraft.color,
+            icon: catDraft.icon,
+            side: catDraft.side,
+          })
+          .select('id')
+          .single();
+        if (error) throw error;
+        const id = data?.id ? String(data.id) : Date.now().toString();
+        const next = { id, ...catDraft } as Category;
+        setCategories((prev) => [...prev, next]);
+        setChosenCat(id);
+      }
+      setCatDraft({ name: '', color: C.accent1, icon: '💰', side: 'revenu' });
+      setEditCatModal(false);
+    } catch (e: any) {
+      Alert.alert('Erreur', e?.message || 'Impossible de sauvegarder la catégorie.');
+    }
   };
   const deleteCategory = (id: string) => {
     Alert.alert('Supprimer', 'Supprimer cette catégorie ?', [
@@ -772,11 +831,24 @@ export default function FinanceScreen() {
       {
         text: 'Supprimer',
         style: 'destructive',
-        onPress: () => {
-          setCategories((prev) => prev.filter((c) => c.id !== id));
-          setTxs((prev) =>
-            prev.map((t) => (t.categoryId === id ? { ...t, categoryId: '' } : t)),
-          );
+        onPress: async () => {
+          try {
+            if (isUuid(id)) {
+              const user = await loadUser();
+              const { error } = await supabase
+                .from('finance_categories')
+                .delete()
+                .eq('id', id)
+                .eq('user_id', user.id);
+              if (error) throw error;
+            }
+            setCategories((prev) => prev.filter((c) => c.id !== id));
+            setTxs((prev) =>
+              prev.map((t) => (t.categoryId === id ? { ...t, categoryId: '' } : t)),
+            );
+          } catch (e: any) {
+            Alert.alert('Erreur', e?.message || 'Suppression impossible.');
+          }
         },
       },
     ]);
@@ -2063,7 +2135,7 @@ const styles = StyleSheet.create({
   txRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: C.card,
+    backgroundColor: C.card2,
     borderRadius: RADII.card,
     padding: 12,
     marginTop: 10,
